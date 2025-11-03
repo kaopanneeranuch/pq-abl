@@ -92,7 +92,7 @@ pub fn compute_root(hashes: &[Hash]) -> Hash {
             nodes[i / 2] = *compute_hash_tree_branch(left, right);
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
-                println!("Merkle Proof : {:?}", nodes[i / 2]);
+                println!("Merkle Proof : {}", nodes[i / 2].to_hex_string());
             }
             i += 2;
         }
@@ -130,6 +130,6 @@ fn main() {
     let merkle_root = compute_root(&leaf_hashes);
 
     // Output the results.
-    println!("Merkle Root: {:?}", merkle_root);
+    // println!("Merkle Root: {:?}", merkle_root);
     println!("Merkle Root (Hex): {}", merkle_root.to_hex_string());
 }
