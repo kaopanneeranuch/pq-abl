@@ -7,19 +7,25 @@
 int main(void) {
     MasterPublicKey mpk;
     MasterSecretKey msk;
-    if (!lcp_types_load_mpk("keys/MPK.bin",&mpk) ||
-        !lcp_types_load_msk("keys/MSK.bin",&msk)) {
+    if (!lcp_load_mpk(&mpk, "keys/MPK.bin") ||
+        !lcp_load_msk(&msk, "keys/MSK.bin")) {
         fprintf(stderr,"Failed to load MPK/MSK\n"); return 1;
     }
-    AttributeSet attrs = attribute_set_new();
-    attribute_set_add(&attrs,"user_role","admin");
-    attribute_set_add(&attrs,"team","storage-team");
+
+    /* Build attribute set */
+    AttributeSet attrs;
+    attribute_set_init(&attrs);
+    Attribute a1; attribute_init(&a1, "user_role:admin", 0);
+    Attribute a2; attribute_init(&a2, "team:storage-team", 1);
+    attribute_set_add(&attrs, &a1);
+    attribute_set_add(&attrs, &a2);
 
     UserSecretKey sk;
-    if (!lcp_keygen(&mpk,&msk,&attrs,&sk)) {
+    usk_init(&sk, 2);
+    if (!lcp_keygen(&mpk, &msk, &attrs, &sk)) {
         fprintf(stderr,"KeyGen failed\n"); return 1;
     }
-    lcp_types_save_sk("keys/SK_admin_storage.bin",&sk);
+    lcp_save_usk(&sk, "keys/SK_admin_storage.bin");
     printf("Wrote keys/SK_admin_storage.bin\n");
     return 0;
 }

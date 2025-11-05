@@ -7,14 +7,14 @@
 int main(void) {
     MasterPublicKey mpk;
     UserSecretKey sk;
-    if (!lcp_types_load_mpk("keys/MPK.bin",&mpk) ||
-        !lcp_types_load_sk("keys/SK_admin_storage.bin",&sk)) {
+    if (!lcp_load_mpk(&mpk, "keys/MPK.bin") ||
+        !lcp_load_usk(&sk, "keys/SK_admin_storage.bin")) {
         fprintf(stderr,"Failed to load keys\n"); return 1;
     }
     mkdir("out/decrypted",0755);
     // choose one encrypted file produced earlier:
-    const char *ctfile = "out/encrypted/epoch_0_policy_admin_storage.json";
-    if (!lcp_decrypt_file(&mpk,&sk,ctfile,"out/decrypted")) {
+    const char *ctfile = "out/encrypted/batch_epoch0_policy1.bin";
+    if (load_and_decrypt_batch(ctfile, &sk, &mpk) != 0) {
         fprintf(stderr,"Decrypt failed\n"); return 1;
     }
     printf("Decryption done. See out/decrypted/\n");

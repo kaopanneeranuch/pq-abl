@@ -12,8 +12,9 @@ int main(void) {
         return 1;
     }
     mkdir("keys",0755);
-    lcp_types_save_mpk("keys/MPK.bin",&mpk);
-    lcp_types_save_msk("keys/MSK.bin",&msk);
+    /* save functions take (const obj*, filename) */
+    lcp_save_mpk(&mpk, "keys/MPK.bin");
+    lcp_save_msk(&msk, "keys/MSK.bin");
     printf("Wrote keys/MPK.bin and keys/MSK.bin\n");
     return 0;
 }

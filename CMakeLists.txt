@@ -33,6 +33,10 @@ set(MODULE_BFRS_SOURCES
     module_gaussian_lattice/Module_BFRS/sampling.c
     module_gaussian_lattice/Module_BFRS/random.c
     module_gaussian_lattice/Module_BFRS/cpucycles.c
+    module_gaussian_lattice/Module_BFRS/crt_trees.c
+    module_gaussian_lattice/Module_BFRS/signature.c
+    module_gaussian_lattice/Module_BFRS/ibe.c
+    module_gaussian_lattice/Module_BFRS/timing.c
 )
 
 # LCP-ABE source files
@@ -58,18 +62,18 @@ if(USE_OPENSSL)
     target_link_libraries(lcp_abe OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
-# Test executables (to be created)
-# add_executable(test_setup test/test_setup.c)
-# target_link_libraries(test_setup lcp_abe)
+# Test executables (built from lcp-abe/test)
+add_executable(test_setup lcp-abe/test/setup.c)
+target_link_libraries(test_setup lcp_abe)
 
-# add_executable(test_keygen test/test_keygen.c)
-# target_link_libraries(test_keygen lcp_abe)
+add_executable(test_keygen lcp-abe/test/keygen.c)
+target_link_libraries(test_keygen lcp_abe)
 
-# add_executable(test_encrypt test/test_encrypt.c)
-# target_link_libraries(test_encrypt lcp_abe)
+add_executable(test_encrypt lcp-abe/test/encrypt.c)
+target_link_libraries(test_encrypt lcp_abe)
 
-# add_executable(test_decrypt test/test_decrypt.c)
-# target_link_libraries(test_decrypt lcp_abe)
+add_executable(test_decrypt lcp-abe/test/decrypt.c)
+target_link_libraries(test_decrypt lcp_abe)
 
 # Installation
 install(TARGETS lcp_abe module_bfrs
