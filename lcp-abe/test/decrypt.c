@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include "lcp-abe/common/lcp_types.h"
 #include "lcp-abe/decrypt/lcp_decrypt.h"
 
