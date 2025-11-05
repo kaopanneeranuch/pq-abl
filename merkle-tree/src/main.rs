@@ -19,7 +19,8 @@ limitations under the License.
 // https://medium.com/@p4524888/building-a-merkle-tree-root-computation-in-rust-c6b9731102aa
 use std::{
     fmt,
-    fs::File,
+    fs::{File, OpenOptions},
+    fs,
     io::{prelude::*, BufReader},
     path::Path};
 use sha3::{Digest, Sha3_256};
@@ -99,6 +100,15 @@ pub fn compute_root(hashes: &[Hash]) -> Hash {
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
                 println!("Merkle Proof : {}", nodes[i / 2].to_hex_string());
+                let mut file_proof = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open("temp_proof")
+                    .unwrap();
+                if let Err(e) = writeln!(file_proof, "{}", nodes[i/2].to_hex_string()){
+                    eprintln!("Counldn't write proof to file: {}", e)
+                }
+                // fs::write("./temp", nodes[i/2].to_hex_string()).expect("Should be able to write to ./temp");
             }
             i += 2;
         }
@@ -154,4 +164,12 @@ fn main() {
     // Output the results.
     // println!("Merkle Root: {:?}", merkle_root);
     println!("Merkle Root (Hex): {}", merkle_root.to_hex_string());
+    let mut file_root = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("temp_root")
+        .unwrap();
+    if let Err(e) = writeln!(file_root, "{}", merkle_root.to_hex_string()){
+        eprintln!("Counldn't write to file: {}", e)
+    }
 }
