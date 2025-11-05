@@ -15,7 +15,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-use std::fmt;
+
+// https://medium.com/@p4524888/building-a-merkle-tree-root-computation-in-rust-c6b9731102aa
+use std::{
+    fmt,
+    fs::File,
+    io::{prelude::*, BufReader},
+    path::Path};
 use sha3::{Digest, Sha3_256};
 
 // Define the hash size (32 bytes for SHA3-256).
@@ -112,17 +118,33 @@ fn compute_hash_tree_branch(left: &Hash, right: &Hash) -> Box<Hash> {
     Box::new(result)
 }
 
+fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
+    let file = File::open(filename).expect("no such file");
+    let buf = BufReader::new(file);
+    buf.lines()
+        .map(|l| l.expect("Could not parse line"))
+        .collect()
+}
+
 fn main() {
     // Example data for the Merkle tree.
-    let data = vec![
-        b"Block 1".to_vec(),
-        b"Block 2".to_vec(),
-        b"Block 3".to_vec(),
-        b"Block 4".to_vec(),
-    ];
+    let mut v: Vec<_> = Vec::new(); // initialize vector
+    let lines = lines_from_file("../../log_hash"); // read line
+    for line in lines {
+        v.push(line.into_bytes()); // convert string array to byte and push into vector [u8]
+    }
+    // let data = vec![
+    //     b"Block 1".to_vec(),  value = [66, 108, 111, 99, 107, 32, 49]
+    //     b"Block 2".to_vec(),
+    //     b"Block 3".to_vec(),
+    //     b"Block 4".to_vec(),
+    // ];
+    // for d in data{
+    //     println!("{:?}", d);
+    // }
 
     // Compute the hashes for the leaves.
-    let leaf_hashes: Vec<Hash> = data.into_iter()
+    let leaf_hashes: Vec<Hash> = v.into_iter()
         .map(|d| Hash::compute_hash(&d))
         .collect();
 
