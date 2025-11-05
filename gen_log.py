@@ -92,7 +92,7 @@ def make_log_entry(index, timestamp):
     }
     return entry
 
-def generate_logs(count=1000, start_hours=24, epoch_duration=30):
+def generate_logs(count=1000, start_hours=24, epoch_duration=60, jitter_seconds=30):
     """Generate a single log.json file with `count` entries.
     
     - Timestamps span from (now - start_hours) to now
@@ -105,7 +105,8 @@ def generate_logs(count=1000, start_hours=24, epoch_duration=30):
     
     print(f"Generating {total_entries} log entries...")
     print(f"Time range: {start_dt.isoformat()}Z to {now.isoformat()}Z")
-    print(f"Epoch duration: {epoch_duration} minutes")
+    # `epoch_duration` is in seconds
+    print(f"Epoch duration: {epoch_duration} seconds")
     
     # Precompute timestamps distributed across the time range
     timestamps = []
@@ -116,9 +117,9 @@ def generate_logs(count=1000, start_hours=24, epoch_duration=30):
             # Add some randomness within each interval for more realistic distribution
             frac = i / (total_entries - 1)
             base_ts = start_dt + frac * (now - start_dt)
-            # Add random offset within ±5 minutes
-            offset_minutes = random.uniform(-5, 5)
-            ts = base_ts + timedelta(minutes=offset_minutes)
+            # Add random offset within ±jitter_seconds (seconds precision)
+            offset_seconds = random.uniform(-float(jitter_seconds), float(jitter_seconds))
+            ts = base_ts + timedelta(seconds=offset_seconds)
             # Ensure timestamp doesn't go beyond bounds
             ts = max(start_dt, min(now, ts))
             timestamps.append(ts)
@@ -139,7 +140,8 @@ def generate_logs(count=1000, start_hours=24, epoch_duration=30):
     
     # Calculate epoch statistics
     epoch_ids = {}
-    epoch_seconds = epoch_duration * 60
+    # `epoch_duration` is already in seconds
+    epoch_seconds = epoch_duration
     for entry in entries:
         ts = datetime.fromisoformat(entry["timestamp"].replace("Z", ""))
         epoch_id = int(ts.timestamp() // epoch_seconds)
@@ -169,8 +171,12 @@ def parse_args():
         help="How many hours in the past to start timestamps (default 24)"
     )
     p.add_argument(
-        "--epoch-duration", type=int, default=30,
-        help="Epoch duration in minutes for microbatching (default 30)"
+        "--epoch-duration", type=int, default=60,
+        help="Epoch duration in seconds for microbatching (default 60)"
+    )
+    p.add_argument(
+        "--jitter-seconds", type=int, default=30,
+        help="Maximum per-entry timestamp jitter in seconds (default 30)"
     )
     return p.parse_args()
 
@@ -181,9 +187,9 @@ if __name__ == "__main__":
     output_path = generate_logs(
         count=args.count,
         start_hours=args.start_hours,
-        epoch_duration=args.epoch_duration
+        epoch_duration=args.epoch_duration,
+        jitter_seconds=args.jitter_seconds
     )
     
     t1 = time.time()
-    print(f"\n✓ Complete! (elapsed {t1 - t0:.2f}s)")
-    print(f"\nYou can now use '{output_path}' for LCP-ABE encryption testing.")
+    print(f"\nComplete (elapsed {t1 - t0:.2f}s) in '{output_path}'")
