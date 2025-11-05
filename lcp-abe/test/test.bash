@@ -12,7 +12,7 @@ mkdir -p keys out/encrypted out/decrypted
 
 # Setup (produce MPK and MSK)
 gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/setup -I./lcp-abe/util \
-  lcp-abe/test/setup_only.c \
+  lcp-abe/test/setup.c \
   -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
   -o lcp-abe/test/test_setup
 # To run later: ./lcp-abe/test/test_setup
@@ -20,7 +20,7 @@ gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/setup -I./lcp-abe/util \
 
 # KeyGen (produce a user SK for an attribute set)
 gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/keygen -I./lcp-abe/util \
-  lcp-abe/test/keygen_only.c \
+  lcp-abe/test/keygen.c \
   -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
   -o lcp-abe/test/test_keygen
 # To run later: ./lcp-abe/test/test_keygen
@@ -28,7 +28,7 @@ gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/keygen -I./lcp-abe/util \
 
 # Encrypt (produce ciphertexts per epoch+policy)
 gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/encrypt -I./lcp-abe/util \
-  lcp-abe/test/encrypt_only.c \
+  lcp-abe/test/encrypt.c \
   -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
   -o lcp-abe/test/test_encrypt
 # To run later: ./lcp-abe/test/test_encrypt
@@ -36,7 +36,7 @@ gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/encrypt -I./lcp-abe/util 
 
 # Decrypt (recover logs for a user SK and ciphertext)
 gcc -O3 -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/decrypt -I./lcp-abe/util \
-  lcp-abe/test/decrypt_only.c \
+  lcp-abe/test/decrypt.c \
   -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
   -o lcp-abe/test/test_decrypt
 # To run later: ./lcp-abe/test/test_decrypt
