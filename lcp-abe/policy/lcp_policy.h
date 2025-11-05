@@ -2,6 +2,9 @@
 #define LCP_POLICY_H
 
 #include "../common/lcp_types.h"
+/* JsonLogEntry is defined in util/lcp_util.h; include it so policy code
+    and signatures referring to JsonLogEntry see the type. */
+#include "../util/lcp_util.h"
 
 // ============================================================================
 // Policy Parsing

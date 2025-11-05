@@ -2,6 +2,7 @@
 #define LCP_DECRYPT_H
 
 #include "../common/lcp_types.h"
+#include <stddef.h>
 
 // Phase 4: Decryption
 
