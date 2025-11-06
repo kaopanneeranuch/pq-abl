@@ -22,7 +22,7 @@ int main(void) {
 
     UserSecretKey sk;
     usk_init(&sk, 2);
-    if (!lcp_keygen(&mpk, &msk, &attrs, &sk)) {
+    if (lcp_keygen(&mpk, &msk, &attrs, &sk) != 0) { // lcp_keygen returns 0 on success
         fprintf(stderr,"KeyGen failed\n"); return 1;
     }
     lcp_save_usk(&sk, "keys/SK_admin_storage.bin");
