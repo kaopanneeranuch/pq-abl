@@ -37,9 +37,18 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
                     ABECiphertext *ct_abe) {
     printf("[Encrypt] LCP-ABE encrypting key under policy: %s\n", policy->expression);
     
+    printf("[Encrypt]   DEBUG: Entry - key=%p, policy=%p, mpk=%p, ct_abe=%p\n",
+           (void*)key, (void*)policy, (void*)mpk, (void*)ct_abe);
+    printf("[Encrypt]   DEBUG: mpk->n_attributes=%d, mpk->B_plus=%p\n",
+           mpk->n_attributes, (void*)mpk->B_plus);
+    
     // Initialize ciphertext
+    printf("[Encrypt]   DEBUG: Calling abe_ct_init\n");
     abe_ct_init(ct_abe);
+    printf("[Encrypt]   DEBUG: abe_ct_init completed\n");
+    
     ct_abe->policy = *policy;
+    printf("[Encrypt]   DEBUG: Policy copied to ct_abe\n");
     
     // Step 1: Convert policy to LSSS matrix (should be done already)
     if (!policy->share_matrix) {
@@ -51,26 +60,80 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     printf("[Encrypt]   Policy has %d rows in LSSS matrix\n", n_rows);
     
     // Allocate ciphertext components
+    printf("[Encrypt]   DEBUG: Allocating C0 (%d x %d = %d scalars)\n",
+           PARAM_M, PARAM_N, PARAM_M * PARAM_N);
     ct_abe->C0 = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+    if (!ct_abe->C0) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate C0\n");
+        return -1;
+    }
+    printf("[Encrypt]   DEBUG: C0 allocated at %p\n", (void*)ct_abe->C0);
+    
+    printf("[Encrypt]   DEBUG: Allocating C array for %d rows\n", n_rows);
     ct_abe->C = (poly_matrix*)calloc(n_rows, sizeof(poly_matrix));
+    if (!ct_abe->C) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate C array\n");
+        free(ct_abe->C0);
+        return -1;
+    }
+    printf("[Encrypt]   DEBUG: C array allocated at %p\n", (void*)ct_abe->C);
+    
     for (uint32_t i = 0; i < n_rows; i++) {
         ct_abe->C[i] = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+        if (!ct_abe->C[i]) {
+            fprintf(stderr, "[Encrypt] ERROR: Failed to allocate C[%d]\n", i);
+            for (uint32_t j = 0; j < i; j++) {
+                free(ct_abe->C[j]);
+            }
+            free(ct_abe->C);
+            free(ct_abe->C0);
+            return -1;
+        }
+        if (i == 0) {
+            printf("[Encrypt]   DEBUG: C[%d] allocated at %p\n", i, (void*)ct_abe->C[i]);
+        }
     }
+    
+    printf("[Encrypt]   DEBUG: Allocating ct_key (%d scalars)\n", PARAM_N);
     ct_abe->ct_key = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!ct_abe->ct_key) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate ct_key\n");
+        for (uint32_t i = 0; i < n_rows; i++) {
+            free(ct_abe->C[i]);
+        }
+        free(ct_abe->C);
+        free(ct_abe->C0);
+        return -1;
+    }
+    printf("[Encrypt]   DEBUG: ct_key allocated at %p\n", (void*)ct_abe->ct_key);
+    
     ct_abe->n_components = n_rows;
+    printf("[Encrypt]   DEBUG: All ciphertext components allocated successfully\n");
     
     // ========================================================================
     // Step 2: Sample random secret vector s ∈ R_q^k (k = PARAM_D)
     // ========================================================================
     printf("[Encrypt] Sampling random secret vector s ∈ R_q^%d\n", PARAM_D);
+    printf("[Encrypt]   DEBUG: Allocating s (%d x %d = %d scalars)\n", 
+           PARAM_D, PARAM_N, PARAM_D * PARAM_N);
+    
     poly_matrix s = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+    if (!s) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate s\n");
+        return -1;
+    }
+    printf("[Encrypt]   DEBUG: s allocated at %p\n", (void*)s);
+    
     for (uint32_t i = 0; i < PARAM_D; i++) {
         poly s_i = poly_matrix_element(s, PARAM_D, i, 0);
         random_poly(s_i, PARAM_N - 1);
     }
+    printf("[Encrypt]   DEBUG: s sampling completed\n");
     
     // Convert s to CRT domain for arithmetic
+    printf("[Encrypt]   DEBUG: Converting s to CRT domain\n");
     matrix_crt_representation(s, PARAM_D, 1, LOG_R);
+    printf("[Encrypt]   DEBUG: s CRT conversion completed\n");
     
     // ========================================================================
     // Step 3: Generate LSSS shares λ = M · [s_scalar, r_1, ..., r_{n-1}]^T
@@ -284,15 +347,22 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
                          const uint8_t nonce[AES_NONCE_SIZE],
                          const LogMetadata *metadata,
                          SymmetricCiphertext *ct_sym) {
+    printf("[AES-GCM] DEBUG: Entry - log_len=%zu\n", log_len);
+    
     // Allocate ciphertext buffer
+    printf("[AES-GCM] DEBUG: Allocating ciphertext buffer (%zu bytes)\n", log_len);
     ct_sym->ciphertext = (uint8_t*)malloc(log_len);
     if (!ct_sym->ciphertext) {
+        fprintf(stderr, "[AES-GCM] ERROR: Failed to allocate ciphertext\n");
         return -1;
     }
+    printf("[AES-GCM] DEBUG: Ciphertext allocated at %p\n", (void*)ct_sym->ciphertext);
+    
     ct_sym->ct_len = log_len;
     
     // Copy nonce
     memcpy(ct_sym->nonce, nonce, AES_NONCE_SIZE);
+    printf("[AES-GCM] DEBUG: Nonce copied\n");
     
     // Prepare AAD (additional authenticated data) from metadata
     uint8_t aad[512];
@@ -303,18 +373,22 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
                              metadata->resource_id,
                              metadata->action_type,
                              metadata->service_name);
+    printf("[AES-GCM] DEBUG: AAD prepared (len=%zu)\n", aad_len);
     
     // Encrypt with AES-GCM
+    printf("[AES-GCM] DEBUG: Calling aes_gcm_encrypt\n");
     int result = aes_gcm_encrypt(log_data, log_len, key, nonce,
                                 aad, aad_len,
                                 ct_sym->ciphertext, ct_sym->tag);
     
     if (result != 0) {
+        fprintf(stderr, "[AES-GCM] ERROR: aes_gcm_encrypt failed\n");
         free(ct_sym->ciphertext);
         ct_sym->ciphertext = NULL;
         return -1;
     }
     
+    printf("[AES-GCM] DEBUG: Encryption successful\n");
     return 0;
 }
 
@@ -433,16 +507,20 @@ int encrypt_microbatch(const JsonLogEntry *logs,
     
     // Encrypt each log in the batch
     for (uint32_t i = 0; i < n_logs; i++) {
-        if (i < 3 || i == n_logs - 1) {
-            printf("[Microbatch]     Log %d/%d: Generating unique K_log and encrypting\n", 
-                   i + 1, n_logs);
-        }
+        printf("\n[Microbatch] ========================================\n");
+        printf("[Microbatch]     Log %d/%d: Starting encryption\n", i + 1, n_logs);
+        printf("[Microbatch] ========================================\n");
         
         // Initialize encrypted log object
         EncryptedLogObject *encrypted_log = &batch->logs[i];
+        printf("[Microbatch]     DEBUG: encrypted_log address = %p\n", (void*)encrypted_log);
+        
+        printf("[Microbatch]     DEBUG: Calling encrypted_log_init\n");
         encrypted_log_init(encrypted_log);
+        printf("[Microbatch]     DEBUG: encrypted_log_init completed\n");
         
         // Copy metadata
+        printf("[Microbatch]     DEBUG: Copying metadata\n");
         strncpy(encrypted_log->metadata.timestamp, logs[i].timestamp, 32);
         strncpy(encrypted_log->metadata.user_id, logs[i].user_id, 64);
         strncpy(encrypted_log->metadata.user_role, logs[i].user_role, 32);
@@ -452,30 +530,41 @@ int encrypt_microbatch(const JsonLogEntry *logs,
         strncpy(encrypted_log->metadata.resource_type, logs[i].resource_type, 32);
         strncpy(encrypted_log->metadata.service_name, logs[i].service_name, 32);
         strncpy(encrypted_log->metadata.region, logs[i].region, 32);
+        printf("[Microbatch]     DEBUG: Metadata copied\n");
         
         // Step 1: Generate fresh K_log and nonce for THIS log (content-level isolation)
+        printf("[Microbatch]     Step 1: Generating unique K_log (256-bit) and nonce (96-bit)\n");
         uint8_t k_log[AES_KEY_SIZE];
         uint8_t nonce[AES_NONCE_SIZE];
         rng_key(k_log);
         rng_nonce(nonce);
+        printf("[Microbatch]     DEBUG: K_log and nonce generated\n");
         
         // Step 2: Symmetric encryption CT_sym = AES_GCM_{K_log}(L_n, AAD)
+        printf("[Microbatch]     Step 2: Symmetric encryption with AES-GCM\n");
         size_t log_len = strlen(logs[i].log_data);
+        printf("[Microbatch]     DEBUG: log_len=%zu, log_data='%s'\n", log_len, logs[i].log_data);
+        
         if (encrypt_log_symmetric((const uint8_t*)logs[i].log_data, log_len,
                                  k_log, nonce, &encrypted_log->metadata,
                                  &encrypted_log->ct_sym) != 0) {
-            fprintf(stderr, "Error: Symmetric encryption failed for log %d\n", i);
+            fprintf(stderr, "[Microbatch] ERROR: Symmetric encryption failed for log %d\n", i);
             return -1;
         }
+        printf("[Microbatch]     DEBUG: Symmetric encryption completed\n");
         
         // Step 3: Encapsulate K_log with LCP-ABE under batch policy
+        printf("[Microbatch]     Step 3: ABE encryption of K_log\n");
         if (lcp_abe_encrypt(k_log, &batch->policy, mpk, &encrypted_log->ct_abe) != 0) {
-            fprintf(stderr, "Error: ABE encryption failed for log %d\n", i);
+            fprintf(stderr, "[Microbatch] ERROR: ABE encryption failed for log %d\n", i);
             return -1;
         }
+        printf("[Microbatch]     DEBUG: ABE encryption completed\n");
         
         // Step 4: Compute hash h_i = SHA3-256(CT_obj)
+        printf("[Microbatch]     Step 4: Computing SHA3-256 hash\n");
         sha3_256_log_object(encrypted_log, encrypted_log->hash);
+        printf("[Microbatch]     ✓ Log %d/%d encrypted successfully\n\n", i + 1, n_logs);
     }
     
     printf("[Microbatch]   ✓ Batch complete: %d logs encrypted with shared policy '%s'\n", 
