@@ -1005,6 +1005,22 @@ void reduce_double_crt_poly(poly crt_f, double_poly double_crt_f, int depth)
 
 
 /*
+	Convenience wrapper for polynomial multiplication in CRT representation
+	h = f * g (mod q, reduced)
+*/
+void mul_poly_crt(poly h, poly f, poly g)
+	{
+	int depth = LOG_R;
+	double_poly temp = (double_poly)calloc(2*PARAM_N, sizeof(scalar));
+	
+	mul_crt_poly(temp, f, g, depth);
+	reduce_double_crt_poly(h, temp, depth);
+	
+	free(temp);
+	}
+
+
+/*
 	Multiply f and g of degree <= deg into h of degree <= 2*deg
 		returns a non-normalized double_poly
 */

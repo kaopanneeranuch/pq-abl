@@ -176,7 +176,7 @@ See `policy_config.json`:
       "expression": "(user_role:admin AND team:storage-team)"
     }
   ],
-  "epoch_duration_minutes": 30
+  "epoch_duration_seconds": 60
 }
 ```
 

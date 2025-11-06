@@ -304,8 +304,8 @@ uint64_t parse_timestamp(const char *timestamp) {
 }
 
 uint64_t get_epoch_id(uint64_t timestamp_seconds) {
-    // 30-minute epochs = 1800 seconds
-    return timestamp_seconds / (EPOCH_DURATION_MINUTES * 60);
+    // 60-second epochs
+    return timestamp_seconds / (EPOCH_DURATION_SECONDS);
 }
 
 int in_same_epoch(const char *ts1, const char *ts2) {

@@ -18,6 +18,6 @@
 #define SHA3_DIGEST_SIZE 32      // 256 bits
 
 // Epoch parameters
-#define EPOCH_DURATION_MINUTES 30
+#define EPOCH_DURATION_SECONDS 60
 
 #endif // LCP_PARAMS_H

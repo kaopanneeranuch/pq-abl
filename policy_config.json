@@ -27,5 +27,5 @@
       }
     }
   ],
-  "epoch_duration_minutes": 30
+  "epoch_duration_seconds": 60
 }
