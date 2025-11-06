@@ -150,9 +150,8 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // This modifies mpk->A temporarily to include attribute-specific component
         construct_A_m(mpk->A, f_i);
         
-        printf("[KeyGen]       DEBUG: Converting target to CRT domain...\n");
-        // Convert target to CRT domain (required by sample_pre_target)
-        matrix_crt_representation(target, PARAM_D, 1, LOG_R);
+        // NOTE: target should stay in coefficient domain based on IBE implementation
+        // The u parameter in sample_pre_target is used in coefficient-domain arithmetic
         
         printf("[KeyGen]       DEBUG: Calling sample_pre_target...\n");
         printf("[KeyGen]       DEBUG: This may take 10-30 seconds for Gaussian sampling...\n");
