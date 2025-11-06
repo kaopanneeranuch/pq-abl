@@ -110,28 +110,53 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             // omega_i[i][j] is the j-th polynomial in the omega_i vector
             poly omega_ij = &usk->omega_i[i][j * PARAM_N];
             
-            if (j == 0 || j == PARAM_M - 1) {
+            if (j < 3 || j == PARAM_M - 1) {
                 printf("[KeyGen]         [j=%d] B_ij=%p, omega_ij=%p\n", 
                        j, (void*)B_ij, (void*)omega_ij);
+                // Check first few values
+                printf("[KeyGen]           B_ij[0]=%u, B_ij[1]=%u, omega_ij[0]=%u, omega_ij[1]=%u\n",
+                       B_ij[0], B_ij[1], omega_ij[0], omega_ij[1]);
             }
             
-            // Multiply polynomials in CRT domain
+            // Allocate double_poly for multiplication result
+            // double_scalar is 64-bit, need PARAM_N of them
+            size_t double_poly_size = PARAM_N * sizeof(double_scalar);
             double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+            
             if (!temp_prod) {
-                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate temp_prod at j=%d\n", j);
+                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate temp_prod at j=%d (size=%zu bytes)\n", 
+                        j, double_poly_size);
                 free(temp_result);
                 free(target);
                 free(sum_term);
                 return -1;
             }
             
+            if (j < 2) {
+                printf("[KeyGen]         [j=%d] Allocated temp_prod=%p, size=%zu bytes\n", 
+                       j, (void*)temp_prod, double_poly_size);
+                printf("[KeyGen]         [j=%d] Calling mul_crt_poly...\n", j);
+            }
+            
+            // Multiply polynomials in CRT domain
             mul_crt_poly(temp_prod, B_ij, omega_ij, LOG_R);
+            
+            if (j < 2) {
+                printf("[KeyGen]         [j=%d] mul_crt_poly completed, temp_prod[0]=%lu\n", 
+                       j, (unsigned long)temp_prod[0]);
+            }
             
             // Reduce and add to accumulator
             for (uint32_t k = 0; k < PARAM_N; k++) {
                 temp_result[k] = (temp_result[k] + (scalar)(temp_prod[k] % PARAM_Q)) % PARAM_Q;
             }
+            
             free(temp_prod);
+            
+            if (j < 2) {
+                printf("[KeyGen]         [j=%d] Freed temp_prod, temp_result[0]=%u\n", 
+                       j, temp_result[0]);
+            }
         }
         
         printf("[KeyGen]       Dot product complete, adding to sum_term\n");

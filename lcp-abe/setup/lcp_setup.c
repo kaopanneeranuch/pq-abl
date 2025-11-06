@@ -144,6 +144,32 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     }
     
     printf("[Setup]   Generated %d attribute vector pairs (B+_i, B-_i)\n", n_attributes);
+    printf("[Setup]   Converting attribute vectors to CRT representation...\n");
+    
+    // Convert B_plus and B_minus to CRT domain for efficient multiplication
+    for (uint32_t i = 0; i < n_attributes; i++) {
+        poly_matrix B_plus_i = &mpk->B_plus[i * PARAM_M * PARAM_N];
+        poly_matrix B_minus_i = &mpk->B_minus[i * PARAM_M * PARAM_N];
+        
+        // Convert each polynomial in the row to CRT
+        for (uint32_t j = 0; j < PARAM_M; j++) {
+            poly B_plus_ij = &B_plus_i[j * PARAM_N];
+            poly B_minus_ij = &B_minus_i[j * PARAM_N];
+            
+            crt_representation(B_plus_ij, LOG_R);
+            crt_representation(B_minus_ij, LOG_R);
+        }
+        
+        if (i % 20 == 0) {
+            printf("[Setup]     Converted attributes 0-%d to CRT\n", i);
+        }
+    }
+    
+    printf("[Setup]   All %d attribute vectors converted to CRT\n", n_attributes);
+    
+    // Also convert β to CRT for encryption
+    printf("[Setup]   Converting β to CRT representation...\n");
+    crt_representation(mpk->beta, LOG_R);
     
     // ========================================================================
     // Algorithm 1, Lines 6-7: Output MPK and MSK
