@@ -250,19 +250,24 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         printf("[Encrypt]     DEBUG: e_i sampling completed\n");
         
         // Make e_i positive and convert to CRT
+        printf("[Encrypt]     DEBUG: Making e_i positive\n");
         for (int j = 0; j < PARAM_N * PARAM_M; j++) {
             e_i[j] += PARAM_Q;
         }
+        printf("[Encrypt]     DEBUG: Converting e_i to CRT domain\n");
         matrix_crt_representation(e_i, PARAM_M, 1, LOG_R);
+        printf("[Encrypt]     DEBUG: e_i CRT conversion completed\n");
         
         // Compute B+_{ρ(i)}^T · s: Actually compute dot product B+[attr_idx] · s
         // B_plus_attr is m polynomials (row vector)
         // s is k-dimensional vector
         // We compute weighted sum for each component j of output (m-dimensional)
         
+        printf("[Encrypt]     DEBUG: Computing C[%d] = B+ · s + e_i + λ·g\n", i);
         for (uint32_t j = 0; j < PARAM_M; j++) {
-            poly c_i_j = poly_matrix_element(ct_abe->C[i], PARAM_M, j, 0);
-            poly e_i_j = poly_matrix_element(e_i, PARAM_M, j, 0);
+            // C[i] and e_i are column vectors (m x 1), so nb_col = 1
+            poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
+            poly e_i_j = poly_matrix_element(e_i, 1, j, 0);
             
             // Start with error
             memcpy(c_i_j, e_i_j, PARAM_N * sizeof(scalar));
@@ -271,13 +276,27 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
             poly B_j = &B_plus_attr[j * PARAM_N];
             
             // Multiply B_j by first component of s (simplified)
-            poly s_0 = poly_matrix_element(s, PARAM_D, 0, 0);
+            // s is column vector (k x 1), so nb_col = 1
+            poly s_0 = poly_matrix_element(s, 1, 0, 0);
             
-            double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+            // NOTE: temp_prod needs 2*PARAM_N for CRT multiplication!
+            double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            if (!temp_prod) {
+                fprintf(stderr, "[Encrypt] ERROR: Failed to allocate temp_prod\n");
+                free(e_i);
+                goto cleanup_error;
+            }
+            
             mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
             
             // Properly reduce double_poly in CRT domain to poly
             poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (!reduced) {
+                fprintf(stderr, "[Encrypt] ERROR: Failed to allocate reduced\n");
+                free(temp_prod);
+                free(e_i);
+                goto cleanup_error;
+            }
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             
             // Add to c_i_j
