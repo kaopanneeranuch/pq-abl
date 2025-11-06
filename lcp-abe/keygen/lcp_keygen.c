@@ -101,7 +101,10 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // Step 4: Use Gaussian sampling to compute sk_i such that A · sk_i = target
         // This uses the trapdoor T_A and sample_pre_target function
         poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));
-        h_inv[0] = 1; // Identity for now (simplified)
+        h_inv[0] = 1; // Identity polynomial in coefficient domain
+        
+        // Convert h_inv to CRT domain (required by sample_pre_target)
+        crt_representation(h_inv, LOG_R);
         
         sample_pre_target(usk->sk_components[idx], mpk->A, msk->T,
                          msk->cplx_T, msk->sch_comp, h_inv, target);
