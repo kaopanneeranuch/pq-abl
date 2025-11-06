@@ -63,7 +63,7 @@ int policy_parse(const char *expression, AccessPolicy *policy) {
 
 // Match log entry attributes to policy
 int policy_match_log(const JsonLogEntry *log, const AccessPolicy *policy) {
-    // Simple matching: check if policy expression contains log's role and team
+    // Simple matching: check if policy expression contains log's role and/or team
     char role_attr[128];
     char team_attr[128];
     
@@ -72,6 +72,10 @@ int policy_match_log(const JsonLogEntry *log, const AccessPolicy *policy) {
     
     int has_role = (strstr(policy->expression, role_attr) != NULL);
     int has_team = (strstr(policy->expression, team_attr) != NULL);
+    
+    // Check if policy contains role or team prefix
+    int policy_has_role = (strstr(policy->expression, "user_role:") != NULL);
+    int policy_has_team = (strstr(policy->expression, "team:") != NULL);
     
     // Check if AND or OR
     int is_and = (strstr(policy->expression, "AND") != NULL);
@@ -82,7 +86,15 @@ int policy_match_log(const JsonLogEntry *log, const AccessPolicy *policy) {
     } else if (is_or) {
         return has_role || has_team;
     } else {
-        return has_role && has_team; // Default to AND
+        // Single attribute policy: match if any required attribute matches
+        if (policy_has_role && !policy_has_team) {
+            return has_role;
+        } else if (policy_has_team && !policy_has_role) {
+            return has_team;
+        } else {
+            // Both attributes in policy but no explicit AND/OR, default to AND
+            return has_role && has_team;
+        }
     }
 }
 
