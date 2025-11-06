@@ -412,10 +412,12 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     printf("[Encrypt] LCP-ABE encryption complete\n");
     
     // Cleanup
+    printf("[Encrypt]   DEBUG: Cleanup - freeing s, shares, e0\n");
     free(s);
     free(shares);
     free(e0);
-    free(e_key);
+    // e_key already freed above
+    printf("[Encrypt]   DEBUG: Cleanup completed\n");
     
     return 0;
 
