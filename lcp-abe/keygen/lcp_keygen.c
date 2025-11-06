@@ -56,7 +56,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     // Allocate temporary storage
     poly f_i = (poly)calloc(PARAM_N, sizeof(scalar));
     poly_matrix target = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
-    poly_matrix u_i = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     
     // For each attribute in the set
     for (uint32_t idx = 0; idx < attr_set->count; idx++) {
@@ -68,40 +67,20 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // Step 1: Hash attribute to polynomial f_i = H(attr_i)
         hash_attribute_to_poly(attr->name, f_i);
         
-        printf("[KeyGen]     Step 2: Getting u_i from MPK...\n");
-        // Step 2: Get u_i from MPK (attribute's public vector)
+        printf("[KeyGen]     Step 2: Getting u_i from MPK as target...\n");
+        // Step 2: Verify attribute index is valid
         if (attr->index >= mpk->n_attributes) {
             fprintf(stderr, "Error: Attribute index %d out of range\n", attr->index);
             free(f_i);
             free(target);
-            free(u_i);
             return -1;
         }
         
-        // Copy u_i from MPK
-        memcpy(u_i, poly_matrix_element(mpk->U, mpk->n_attributes, 0, attr->index),
+        // Copy u_i from MPK to use as target
+        memcpy(target, poly_matrix_element(mpk->U, mpk->n_attributes, 0, attr->index),
                PARAM_D * PARAM_N * sizeof(scalar));
         
-        printf("[KeyGen]     Step 3: Computing target vector...\n");
-        // Step 3: Compute target = u_i + f_i * e_1, where e_1 = [1, 0, ..., 0]^T
-        // This is the standard construction for lattice-based ABE:
-        // target[0] = u_i[0] + f_i (coefficient-wise polynomial addition)
-        // target[j] = u_i[j] for j > 0 (unchanged)
-        for (uint32_t j = 0; j < PARAM_D; j++) {
-            poly target_j = poly_matrix_element(target, 1, j, 0);
-            poly u_i_j = poly_matrix_element(u_i, 1, j, 0);
-            
-            if (j == 0) {
-                // First component: add f_i coefficient-wise
-                // target[0] = u_i[0] + f_i in R_q
-                for (uint32_t k = 0; k < PARAM_N; k++) {
-                    target_j[k] = (u_i_j[k] + f_i[k]) % PARAM_Q;
-                }
-            } else {
-                // Other components: copy as-is
-                memcpy(target_j, u_i_j, PARAM_N * sizeof(scalar));
-            }
-        }
+        printf("[KeyGen]     Step 3: Target is u_i (attribute public vector from MPK)\n");
         
         printf("[KeyGen]     Step 4: Sampling preimage using trapdoor (this may take a few seconds)...\n");
         // Step 4: Use Gaussian sampling to compute sk_i such that A_i · sk_i = target
@@ -173,7 +152,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     
     free(f_i);
     free(target);
-    free(u_i);
     
     printf("[KeyGen] User secret key generated successfully!\n");
     printf("[KeyGen] SK size: %d attribute components, each %d polynomials\n",
