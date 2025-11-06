@@ -103,6 +103,24 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         
         printf("[KeyGen]       Computing dot product over %d polynomials\n", PARAM_M);
         
+        // Allocate buffers once for the entire dot product computation
+        double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+        poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        
+        if (!temp_prod || !reduced) {
+            fprintf(stderr, "[KeyGen] ERROR: Failed to allocate multiplication buffers\n");
+            if (temp_prod) free(temp_prod);
+            if (reduced) free(reduced);
+            free(temp_result);
+            free(target);
+            free(sum_term);
+            return -1;
+        }
+        
+        printf("[KeyGen]       Allocated buffers: temp_prod=%p (size=%zu), reduced=%p (size=%zu)\n",
+               (void*)temp_prod, PARAM_N * sizeof(double_scalar),
+               (void*)reduced, PARAM_N * sizeof(scalar));
+        
         for (uint32_t j = 0; j < PARAM_M; j++) {
             // B_plus_i[j] is the j-th polynomial in the row
             poly B_ij = &B_plus_i[j * PARAM_N];
@@ -113,28 +131,13 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             if (j < 3 || j == PARAM_M - 1) {
                 printf("[KeyGen]         [j=%d] B_ij=%p, omega_ij=%p\n", 
                        j, (void*)B_ij, (void*)omega_ij);
-                // Check first few values
-                printf("[KeyGen]           B_ij[0]=%u, B_ij[1]=%u, omega_ij[0]=%u, omega_ij[1]=%u\n",
-                       B_ij[0], B_ij[1], omega_ij[0], omega_ij[1]);
             }
             
-            // Allocate double_poly for multiplication result
-            // double_scalar is 64-bit, need PARAM_N of them
-            size_t double_poly_size = PARAM_N * sizeof(double_scalar);
-            double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
-            
-            if (!temp_prod) {
-                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate temp_prod at j=%d (size=%zu bytes)\n", 
-                        j, double_poly_size);
-                free(temp_result);
-                free(target);
-                free(sum_term);
-                return -1;
-            }
+            // Clear buffers for this iteration
+            memset(temp_prod, 0, PARAM_N * sizeof(double_scalar));
+            memset(reduced, 0, PARAM_N * sizeof(scalar));
             
             if (j < 2) {
-                printf("[KeyGen]         [j=%d] Allocated temp_prod=%p, size=%zu bytes\n", 
-                       j, (void*)temp_prod, double_poly_size);
                 printf("[KeyGen]         [j=%d] Calling mul_crt_poly...\n", j);
             }
             
@@ -147,17 +150,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
                 printf("[KeyGen]         [j=%d] Reducing double_poly to poly...\n", j);
             }
             
-            // Allocate temporary poly for the reduced result
-            poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-            if (!reduced) {
-                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate reduced poly at j=%d\n", j);
-                free(temp_prod);
-                free(temp_result);
-                free(target);
-                free(sum_term);
-                return -1;
-            }
-            
             // Properly reduce double_poly in CRT domain to poly
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             
@@ -168,15 +160,17 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             // Add to accumulator
             add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
             
-            // Free both temporary allocations
-            free(temp_prod);
-            free(reduced);
-            
             if (j < 2) {
-                printf("[KeyGen]         [j=%d] Freed buffers, temp_result[0]=%u\n", 
+                printf("[KeyGen]         [j=%d] Added to accumulator, temp_result[0]=%u\n", 
                        j, temp_result[0]);
             }
         }
+        
+        // Free the shared buffers after the loop
+        free(temp_prod);
+        free(reduced);
+        
+        printf("[KeyGen]       Dot product complete, freed buffers\n");
         
         printf("[KeyGen]       Dot product complete, adding to sum_term\n");
         
