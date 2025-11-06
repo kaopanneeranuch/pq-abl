@@ -258,14 +258,28 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         matrix_crt_representation(e_i, PARAM_M, 1, LOG_R);
         printf("[Encrypt]     DEBUG: e_i CRT conversion completed\n");
         
-        // Compute B+_{ρ(i)}^T · s: Actually compute dot product B+[attr_idx] · s
-        // B_plus_attr is m polynomials (row vector)
-        // s is k-dimensional vector
-        // We compute weighted sum for each component j of output (m-dimensional)
+        // Compute C[i] = s_0 · B+[ρ(i)] + e_i + λ_i·g
+        // where s_0 is first component of s (single polynomial)
+        // B_plus_attr is m-dimensional row vector
+        // Result is m-dimensional column vector
+        //
+        // Note: In KeyGen, we compute β - Σ(B+_i · ω_i) where each B+_i · ω_i is a scalar
+        // that goes into the first component. In Encrypt, we use s_0 (first component of s)
+        // to scale B+, maintaining dimensional consistency.
         
-        // Allocate buffers once outside the loop to avoid repeated allocations
+        printf("[Encrypt]     DEBUG: Computing C[%d] = s_0 · B+[ρ(i)] + e_i + λ·g\n", i);
+        
+        // Get s_0: first component of s (k-dimensional column vector)
+        poly s_0 = poly_matrix_element(s, 1, 0, 0);
+        printf("[Encrypt]     DEBUG: s_0 address = %p\n", (void*)s_0);
+        
+        // Allocate buffers once for all j iterations
+        printf("[Encrypt]     DEBUG: About to allocate temp_prod (%lu bytes)\n", 
+               (unsigned long)(2 * PARAM_N * sizeof(double_scalar)));
         double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        printf("[Encrypt]     DEBUG: temp_prod allocated at %p\n", (void*)temp_prod);
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        printf("[Encrypt]     DEBUG: reduced allocated at %p\n", (void*)reduced);
         if (!temp_prod || !reduced) {
             fprintf(stderr, "[Encrypt] ERROR: Failed to allocate temp buffers\n");
             if (temp_prod) free(temp_prod);
@@ -274,41 +288,34 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
             goto cleanup_error;
         }
         
-        printf("[Encrypt]     DEBUG: Computing C[%d] = B+ · s + e_i + λ·g\n", i);
-        
-        // s_0 is the first component of s (used in dot product)
-        poly s_0 = poly_matrix_element(s, 1, 0, 0);
-        
+        // For each component j of the m-dimensional output vector
         for (uint32_t j = 0; j < PARAM_M; j++) {
-            // C[i] and e_i are column vectors (m x 1), so nb_col = 1
+            // Access C[i][j] and e_i[j] (both are m×1 column vectors)
             poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
             poly e_i_j = poly_matrix_element(e_i, 1, j, 0);
             
-            // Start with error
-            memcpy(c_i_j, e_i_j, PARAM_N * sizeof(scalar));
-            
-            // B_plus_attr[j] is the j-th polynomial in the row
+            // Get B+[ρ(i)][j]: j-th polynomial of the row vector
             poly B_j = &B_plus_attr[j * PARAM_N];
             
-            // Multiply B_j by first component of s in CRT domain
+            // Multiply: temp_prod = B_j · s_0 (both in CRT domain)
             mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
             
-            // Reduce double_poly to poly (still in CRT domain)
+            // Reduce to single poly (stays in CRT)
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             
-            // Add to c_i_j (both in CRT domain)
-            add_poly(c_i_j, c_i_j, reduced, PARAM_N - 1);
+            // Add error: c_i_j = reduced + e_i_j (both in CRT)
+            add_poly(c_i_j, reduced, e_i_j, PARAM_N - 1);
             
-            // Freeze to ensure coefficients are in [0, PARAM_Q)
+            // Ensure coefficients in valid range
             freeze_poly(c_i_j, PARAM_N - 1);
             
-            // Add share λ_i encoded in first coefficient (gadget encoding)
+            // Encode share λ_i in first polynomial's first coefficient (gadget encoding)
             if (j == 0) {
                 c_i_j[0] = (c_i_j[0] + shares[i]) % PARAM_Q;
             }
         }
         
-        // Free buffers after loop completes
+        // Free buffers after all j processed
         free(temp_prod);
         free(reduced);
         
@@ -335,7 +342,7 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     
     // Add β · s[0] (simplified: use first component of s)
     double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
-    poly s_0 = poly_matrix_element(s, PARAM_D, 0, 0);
+    poly s_0 = poly_matrix_element(s, 1, 0, 0);  // s is column vector (k×1), nb_col=1
     mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
     
     // Properly reduce double_poly in CRT domain to poly
