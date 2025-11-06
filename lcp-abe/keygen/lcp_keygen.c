@@ -150,10 +150,19 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // This modifies mpk->A temporarily to include attribute-specific component
         construct_A_m(mpk->A, f_i);
         
+        printf("[KeyGen]       DEBUG: Converting target to CRT domain...\n");
+        // Convert target to CRT domain (required by sample_pre_target)
+        matrix_crt_representation(target, PARAM_D, 1, LOG_R);
+        
         printf("[KeyGen]       DEBUG: Calling sample_pre_target...\n");
+        printf("[KeyGen]       DEBUG: This may take 10-30 seconds for Gaussian sampling...\n");
+        fflush(stdout);
+        
         // Sample preimage: find sk_i such that A_i · sk_i = target
         sample_pre_target(usk->sk_components[idx], mpk->A, msk->T,
                          msk->cplx_T, msk->sch_comp, f_i_inv, target);
+        
+        printf("[KeyGen]       DEBUG: sample_pre_target returned successfully!\n");
         
         printf("[KeyGen]       DEBUG: Restoring matrix A...\n");
         // Restore A to original state by removing f_i * g^T
