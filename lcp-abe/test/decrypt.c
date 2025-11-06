@@ -9,8 +9,8 @@
 int main(void) {
     MasterPublicKey mpk;
     UserSecretKey sk;
-    if (!lcp_load_mpk(&mpk, "keys/MPK.bin") ||
-        !lcp_load_usk(&sk, "keys/SK_admin_storage.bin")) {
+    if (lcp_load_mpk(&mpk, "keys/MPK.bin") != 0 ||
+        lcp_load_usk(&sk, "keys/SK_admin_storage.bin") != 0) {
         fprintf(stderr,"Failed to load keys\n"); return 1;
     }
     mkdir("out/decrypted",0755);

@@ -35,6 +35,14 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
                const AttributeSet *attr_set, UserSecretKey *usk) {
     printf("[KeyGen] Generating user secret key for %d attributes...\n", attr_set->count);
     
+    // CP-ABE Key Generation Algorithm (Lattice-Based):
+    // For each attribute i in the user's attribute set S:
+    //   1. Compute f_i = H(attr_i) ∈ R_q (hash attribute to polynomial)
+    //   2. Get u_i from MPK (public vector for attribute i)
+    //   3. Compute target = u_i + f_i·e_1, where e_1 = [1,0,...,0]^T
+    //   4. Use trapdoor T_A to sample sk_i from D_{Λ_q^⊥(A), σ} s.t. A·sk_i = target
+    // The user can decrypt if their attributes satisfy the access policy.
+    
     // Initialize user secret key
     usk_init(usk, attr_set->count);
     usk->attr_set = *attr_set;
@@ -66,15 +74,20 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         memcpy(u_i, poly_matrix_element(mpk->U, mpk->n_attributes, 0, attr->index),
                PARAM_D * PARAM_N * sizeof(scalar));
         
-        // Step 3: Compute target = u_i - f_i (element-wise for first component)
-        // target[0] = u_i[0] - f_i, target[j] = u_i[j] for j > 0
+        // Step 3: Compute target = u_i + f_i * e_1, where e_1 = [1, 0, ..., 0]^T
+        // This is the standard construction for lattice-based ABE:
+        // target[0] = u_i[0] + f_i (coefficient-wise polynomial addition)
+        // target[j] = u_i[j] for j > 0 (unchanged)
         for (uint32_t j = 0; j < PARAM_D; j++) {
             poly target_j = poly_matrix_element(target, 1, j, 0);
             poly u_i_j = poly_matrix_element(u_i, 1, j, 0);
             
             if (j == 0) {
-                // First component: subtract f_i
-                sub_poly(target_j, u_i_j, f_i, PARAM_N);
+                // First component: add f_i coefficient-wise
+                // target[0] = u_i[0] + f_i in R_q
+                for (uint32_t k = 0; k < PARAM_N; k++) {
+                    target_j[k] = (u_i_j[k] + f_i[k]) % PARAM_Q;
+                }
             } else {
                 // Other components: copy as-is
                 memcpy(target_j, u_i_j, PARAM_N * sizeof(scalar));

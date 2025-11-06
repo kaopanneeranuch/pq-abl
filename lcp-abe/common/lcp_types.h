@@ -32,6 +32,10 @@ typedef struct {
     uint32_t *rho;                     // Row labeling function ρ: row -> attribute index
     uint32_t matrix_rows;
     uint32_t matrix_cols;
+    
+    // Policy type metadata
+    uint32_t threshold;                // For threshold policies (k-out-of-n)
+    uint32_t is_threshold;             // Flag: 1 if threshold policy, 0 otherwise
 } AccessPolicy;
 
 // Master Public Key (MPK)

@@ -8,8 +8,8 @@
 int main(void) {
     MasterPublicKey mpk;
     MasterSecretKey msk;
-    if (!lcp_load_mpk(&mpk, "keys/MPK.bin") ||
-        !lcp_load_msk(&msk, "keys/MSK.bin")) {
+    if (lcp_load_mpk(&mpk, "keys/MPK.bin") != 0 ||
+        lcp_load_msk(&msk, "keys/MSK.bin") != 0) {
         fprintf(stderr,"Failed to load MPK/MSK\n"); return 1;
     }
 

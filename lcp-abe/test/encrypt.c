@@ -7,7 +7,7 @@
 
 int main(void) {
     MasterPublicKey mpk;
-    if (!lcp_load_mpk(&mpk, "keys/MPK.bin")) {
+    if (lcp_load_mpk(&mpk, "keys/MPK.bin") != 0) {
         fprintf(stderr,"Failed to load MPK\n"); return 1;
     }
     mkdir("out",0755);

@@ -9,8 +9,13 @@
 // Policy Parsing
 // ============================================================================
 
-// Simple policy parser for AND/OR policies
-// Supports: "(attr1 AND attr2)" or "(attr1 OR attr2)"
+// Simple policy parser for AND/OR/THRESHOLD policies
+// Supported formats:
+//   - "(attr1 AND attr2)" - Need all attributes
+//   - "(attr1 OR attr2)" - Need any one attribute
+//   - "THRESHOLD(2, attr1, attr2, attr3)" - Need k=2 out of 3 attributes
+//   - Future: Complex monotone formulas via MSP
+// Example: "(user_role:admin AND team:storage-team)"
 int policy_parse(const char *expression, AccessPolicy *policy) {
     strncpy(policy->expression, expression, MAX_POLICY_SIZE - 1);
     policy->expression[MAX_POLICY_SIZE - 1] = '\0';
@@ -85,21 +90,74 @@ int policy_match_log(const JsonLogEntry *log, const AccessPolicy *policy) {
 // Linear Secret Sharing Scheme (LSSS) for Lattice-Based CP-ABE
 // ============================================================================
 
+// Helper: Build (k, n) threshold LSSS matrix using Shamir secret sharing
+// Matrix has n rows (one per attribute) and k columns
+// Row i corresponds to attribute i with evaluation point x_i = i+1
+static int lsss_threshold_matrix(AccessPolicy *policy) {
+    uint32_t k = policy->threshold;
+    uint32_t n = policy->attr_count;
+    
+    if (k > n || k == 0) {
+        fprintf(stderr, "Error: Invalid threshold %u for %u attributes\n", k, n);
+        return -1;
+    }
+    
+    // Allocate LSSS matrix (n × k)
+    policy->matrix_rows = n;
+    policy->matrix_cols = k;
+    policy->share_matrix = (scalar *)calloc(n * k, sizeof(scalar));
+    policy->rho = (uint32_t *)calloc(n, sizeof(uint32_t));
+    
+    // Build Vandermonde-like matrix for Shamir secret sharing
+    // M[i][j] = (i+1)^j mod q, where i is attribute index, j is power
+    for (uint32_t i = 0; i < n; i++) {
+        policy->rho[i] = i; // Row i → attribute i
+        
+        uint64_t x = i + 1; // Evaluation point x_i = i+1
+        uint64_t power = 1; // x^j
+        
+        for (uint32_t j = 0; j < k; j++) {
+            policy->share_matrix[i * k + j] = (scalar)(power % PARAM_Q);
+            power = (power * x) % PARAM_Q;
+        }
+    }
+    
+    return 0;
+}
+
 // Convert policy to LSSS matrix representation
-// For simple policies, we use a basic LSSS construction:
-// - AND policy: each attribute gets a share, need all shares to reconstruct
-// - OR policy: each attribute gets full secret, need only one to reconstruct
+// Supports:
+// - AND policy: (n, n) threshold - need all attributes
+// - OR policy: (1, n) threshold - need any one attribute  
+// - THRESHOLD policy: (k, n) threshold - need k out of n attributes
+// - Complex policies via LSSS matrix (future work: monotone span programs)
 int lsss_policy_to_matrix(AccessPolicy *policy) {
     if (policy->attr_count == 0) {
         return -1;
     }
     
-    // Check if policy is AND or OR
+    // Initialize policy metadata
+    policy->is_threshold = 0;
+    policy->threshold = policy->attr_count; // Default: AND (need all)
+    
+    // Check if policy is AND, OR, or THRESHOLD
     int is_and = (strstr(policy->expression, "AND") != NULL);
     int is_or = (strstr(policy->expression, "OR") != NULL);
     
+    // Check for threshold format: "THRESHOLD(k, attr1, attr2, ...)"
+    const char *thresh_ptr = strstr(policy->expression, "THRESHOLD(");
+    if (thresh_ptr) {
+        policy->is_threshold = 1;
+        // Parse threshold value k
+        sscanf(thresh_ptr, "THRESHOLD(%u", &policy->threshold);
+        
+        // Build (k, n) threshold LSSS matrix using Shamir secret sharing
+        return lsss_threshold_matrix(policy);
+    }
+    
     if (is_and) {
-        // AND policy: Use (n, n) threshold scheme
+        // AND policy: (n, n) threshold scheme - need ALL attributes
+        policy->threshold = policy->attr_count;
         // Matrix M is n×n identity-like matrix
         policy->matrix_rows = policy->attr_count;
         policy->matrix_cols = policy->attr_count;
@@ -129,7 +187,8 @@ int lsss_policy_to_matrix(AccessPolicy *policy) {
         }
         
     } else if (is_or) {
-        // OR policy: Each attribute gets the full secret
+        // OR policy: (1, n) threshold scheme - need ANY ONE attribute
+        policy->threshold = 1;
         // Matrix M has n rows, 1 column, all entries are 1
         policy->matrix_rows = policy->attr_count;
         policy->matrix_cols = 1;
@@ -184,10 +243,6 @@ int lsss_generate_shares(const AccessPolicy *policy, scalar secret, scalar *shar
 
 // Check if attribute set satisfies policy
 int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr_set) {
-    // Check if policy is AND or OR
-    int is_and = (strstr(policy->expression, "AND") != NULL);
-    int is_or = (strstr(policy->expression, "OR") != NULL);
-    
     // Count how many policy attributes are in the attribute set
     uint32_t match_count = 0;
     for (uint32_t i = 0; i < policy->attr_count; i++) {
@@ -196,6 +251,17 @@ int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr
         if (i < attr_set->count) {
             match_count++;
         }
+    }
+    
+    // Check satisfaction based on policy type
+    if (policy->is_threshold) {
+        // Threshold policy: need at least k matching attributes
+        return match_count >= policy->threshold;
+    }
+    
+    // Check if policy is AND or OR
+    int is_and = (strstr(policy->expression, "AND") != NULL);
+    int is_or = (strstr(policy->expression, "OR") != NULL);
     }
     
     if (is_and) {
