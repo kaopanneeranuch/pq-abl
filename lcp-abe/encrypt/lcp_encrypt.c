@@ -137,9 +137,14 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
                 poly B_jl = poly_matrix_element(B_plus_attr, PARAM_M, 0, (j * PARAM_D + l) % PARAM_M);
                 poly s_l = poly_matrix_element(s, PARAM_D, l, 0);
                 
-                poly temp_prod = (poly)calloc(PARAM_N, sizeof(scalar));
+                double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
                 mul_crt_poly(temp_prod, B_jl, s_l, LOG_R);
-                add_poly(c_i_j, c_i_j, temp_prod, PARAM_N - 1);
+                
+                // Reduce double_poly to poly and add
+                for (uint32_t m = 0; m < PARAM_N; m++) {
+                    c_i_j[m] = (c_i_j[m] + (scalar)(temp_prod[m] % PARAM_Q)) % PARAM_Q;
+                }
+                
                 free(temp_prod);
             }
             
@@ -171,10 +176,14 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     memcpy(ct_abe->ct_key, e_key, PARAM_N * sizeof(scalar));
     
     // Add β · s[0] (simplified: use first component of s)
-    poly temp_prod = (poly)calloc(PARAM_N, sizeof(scalar));
+    double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
     poly s_0 = poly_matrix_element(s, PARAM_D, 0, 0);
     mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
-    add_poly(ct_abe->ct_key, ct_abe->ct_key, temp_prod, PARAM_N - 1);
+    
+    // Reduce and add
+    for (uint32_t i = 0; i < PARAM_N; i++) {
+        ct_abe->ct_key[i] = (ct_abe->ct_key[i] + (scalar)(temp_prod[i] % PARAM_Q)) % PARAM_Q;
+    }
     free(temp_prod);
     
     // Encode K_log into polynomial (pack bytes into coefficients)

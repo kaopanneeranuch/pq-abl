@@ -80,11 +80,13 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             poly omega_ij = poly_matrix_element(usk->omega_i[i], PARAM_M, 0, j);
             
             // Multiply polynomials in CRT domain
-            poly temp_prod = (poly)calloc(PARAM_N, sizeof(scalar));
+            double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
             mul_crt_poly(temp_prod, B_ij, omega_ij, LOG_R);
             
-            // Add to accumulator
-            add_poly(temp_result, temp_result, temp_prod, PARAM_N - 1);
+            // Reduce and add to accumulator
+            for (uint32_t k = 0; k < PARAM_N; k++) {
+                temp_result[k] = (temp_result[k] + (scalar)(temp_prod[k] % PARAM_Q)) % PARAM_Q;
+            }
             free(temp_prod);
         }
         

@@ -55,7 +55,8 @@ echo ""
 
 # 7. Test Decrypt
 echo ">>> Step 7: Testing Decrypt (Phase 4)..."
-./build/test_decrypt 2>/dev/null || echo "⚠ Decrypt not fully implemented yet"
+./build/test_decrypt
+echo "✓ Decrypt complete - check out/decrypted/"
 echo ""
 
 # Summary

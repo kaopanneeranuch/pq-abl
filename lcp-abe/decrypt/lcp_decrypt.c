@@ -29,35 +29,66 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     uint32_t n_coeffs = 0;
     lsss_compute_coefficients(&ct_abe->policy, &usk->attr_set, coefficients, &n_coeffs);
     
-    // Decrypt: compute Σ ω_i · (sk_i^T · C_i)
+    printf("[Decrypt] Using %d attributes for decryption\n", n_coeffs);
+    
+    // ========================================================================
+    // Decryption Algorithm:
+    // For the new scheme with B+, B-, β structure:
+    // 1. Compute partial decryption using ω_i vectors
+    // 2. Use ω_A and reconstruction coefficients
+    // 3. Recover K_log from ct_key using β relationship
+    // ========================================================================
+    
+    // Simplified decryption (basic implementation)
+    // TODO: Full decryption needs proper lattice trapdoor inversion
+    // For now, use a simplified approach for testing
+    
+    poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
+    
+    // Copy ct_key as base
+    memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
+    
+    // Compute sum of contributions from user's attributes
     poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
     
     for (uint32_t i = 0; i < n_coeffs && i < usk->n_components; i++) {
-        // Compute sk_i^T · C_i
+        // For each matching attribute, compute contribution
+        // Using ω_i vectors (m-dimensional)
+        
         poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         
-        for (uint32_t j = 0; j < PARAM_D; j++) {
-            poly sk_ij = poly_matrix_element(usk->sk_components[i], 1, j, 0);
-            poly c_ij = ct_abe->C[i]; // Simplified
-            poly prod = (poly)calloc(PARAM_N, sizeof(scalar));
-            mul_poly_crt(prod, sk_ij, c_ij);
-            add_poly(temp, temp, prod, PARAM_N);
+        // Compute inner product: ω_i^T · C_i
+        // C_i is m-dimensional, ω_i is m-dimensional
+        for (uint32_t j = 0; j < PARAM_M && j < PARAM_D; j++) {
+            poly omega_ij = poly_matrix_element(usk->omega_i[i], PARAM_M, j, 0);
+            poly c_i_j = poly_matrix_element(ct_abe->C[i], PARAM_M, j, 0);
+            
+            double_poly prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+            mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
+            
+            // Reduce double_poly to poly
+            poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            for (uint32_t k = 0; k < PARAM_N; k++) {
+                prod_reduced[k] = (scalar)(prod[k] % PARAM_Q);
+            }
+            
+            add_poly(temp, temp, prod_reduced, PARAM_N - 1);
             free(prod);
+            free(prod_reduced);
         }
         
-        // Multiply by coefficient ω_i
+        // Multiply by reconstruction coefficient
         for (uint32_t k = 0; k < PARAM_N; k++) {
             temp[k] = ((uint64_t)temp[k] * coefficients[i]) % PARAM_Q;
         }
         
         // Add to partial sum
-        add_poly(partial_sum, partial_sum, temp, PARAM_N);
+        add_poly(partial_sum, partial_sum, temp, PARAM_N - 1);
         free(temp);
     }
     
-    // Subtract from ct_key to recover encoded key
-    poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
-    sub_poly(recovered, ct_abe->ct_key, partial_sum, PARAM_N);
+    // Subtract partial sum from ct_key
+    sub_poly(recovered, recovered, partial_sum, PARAM_N - 1);
     
     // Extract key bytes from polynomial coefficients
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
