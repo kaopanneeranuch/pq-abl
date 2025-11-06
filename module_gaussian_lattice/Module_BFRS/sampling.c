@@ -363,6 +363,26 @@ void sample_fz(signed_scalar *p, cplx_poly cplx_p, cplx_poly f, cplx *c, int dep
 void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix sch_comp)
 	{
 	printf("[DEBUG] sample_perturb: START\n"); fflush(stdout);
+	
+	// Validate sch_comp contains reasonable values
+	printf("[DEBUG] sample_perturb: Validating sch_comp...\n"); fflush(stdout);
+	int bad_count = 0;
+	for(int i = 0; i < PARAM_N * PARAM_D * (2 * PARAM_D + 1); ++i) {
+		if (isnan(creal(sch_comp[i])) || isnan(cimag(sch_comp[i])) || 
+		    isinf(creal(sch_comp[i])) || isinf(cimag(sch_comp[i]))) {
+			bad_count++;
+			if (bad_count < 5) {
+				printf("[ERROR] sch_comp[%d] = %f + %fi (NaN or Inf!)\n", i, creal(sch_comp[i]), cimag(sch_comp[i]));
+			}
+		}
+	}
+	if (bad_count > 0) {
+		printf("[ERROR] Found %d invalid values in sch_comp! This will cause infinite loops.\n", bad_count);
+	} else {
+		printf("[DEBUG] sch_comp validation passed (first few values: [0]=%f+%fi, [1]=%f+%fi)\n", 
+		       creal(sch_comp[0]), cimag(sch_comp[0]), creal(sch_comp[1]), cimag(sch_comp[1]));
+	}
+	
 	//cplx T_coeffs[PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K], sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
 	//cplx *T_coeffs = malloc(PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K * sizeof(cplx)), sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
 	//cplx_poly_matrix T = T_coeffs, sch_comp = sch_comp_coeffs, c = c_coeffs, cplx_p = cplx_p_coeffs;
