@@ -352,26 +352,16 @@ int encrypt_microbatch(const JsonLogEntry *logs,
     // Deep copy policy (including LSSS matrix)
     batch->policy.attr_count = policy->attr_count;
     batch->policy.threshold = policy->threshold;
+    batch->policy.is_threshold = policy->is_threshold;
     strncpy(batch->policy.expression, policy->expression, sizeof(batch->policy.expression) - 1);
     batch->policy.expression[sizeof(batch->policy.expression) - 1] = '\0';
     
-    // Copy attributes
-    for (uint32_t j = 0; j < policy->attr_count && j < MAX_POLICY_ATTRS; j++) {
-        batch->policy.attributes[j] = policy->attributes[j];
+    // Copy attribute indices
+    for (uint32_t j = 0; j < policy->attr_count && j < MAX_ATTRIBUTES; j++) {
+        batch->policy.attr_indices[j] = policy->attr_indices[j];
     }
     
-    // Allocate and copy LSSS matrix
-    if (policy->lsss_matrix && policy->lsss_rows > 0 && policy->lsss_cols > 0) {
-        batch->policy.lsss_rows = policy->lsss_rows;
-        batch->policy.lsss_cols = policy->lsss_cols;
-        size_t matrix_size = policy->lsss_rows * policy->lsss_cols * sizeof(int);
-        batch->policy.lsss_matrix = (int*)malloc(matrix_size);
-        if (batch->policy.lsss_matrix) {
-            memcpy(batch->policy.lsss_matrix, policy->lsss_matrix, matrix_size);
-        }
-    }
-    
-    // Copy share_matrix if present
+    // Allocate and copy share_matrix (LSSS matrix)
     if (policy->share_matrix && policy->matrix_rows > 0 && policy->matrix_cols > 0) {
         batch->policy.matrix_rows = policy->matrix_rows;
         batch->policy.matrix_cols = policy->matrix_cols;
@@ -379,6 +369,14 @@ int encrypt_microbatch(const JsonLogEntry *logs,
         batch->policy.share_matrix = (scalar*)malloc(matrix_size);
         if (batch->policy.share_matrix) {
             memcpy(batch->policy.share_matrix, policy->share_matrix, matrix_size);
+        }
+    }
+    
+    // Copy rho (row labeling function)
+    if (policy->rho && policy->matrix_rows > 0) {
+        batch->policy.rho = (uint32_t*)malloc(policy->matrix_rows * sizeof(uint32_t));
+        if (batch->policy.rho) {
+            memcpy(batch->policy.rho, policy->rho, policy->matrix_rows * sizeof(uint32_t));
         }
     }
     
