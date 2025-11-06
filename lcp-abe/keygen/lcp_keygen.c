@@ -64,20 +64,24 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
         
-        // Get B+_i: 1×m vector for this attribute
-        poly_matrix B_plus_i = poly_matrix_element(mpk->B_plus, mpk->n_attributes, attr->index, 0);
+        printf("[KeyGen]     Processing attribute %d/%d (index %d): %s\n", 
+               i+1, attr_set->count, attr->index, attr->name);
         
-        // Compute B+_i · ωi (1×m · m×1 = scalar in Rq, but we treat as k-dim for module)
-        // Actually, B+_i is 1×m and ωi is m×1, so result should be 1×1 polynomial
-        // But we need k-dimensional output for the module structure
+        // Get B+_i: this is the attr->index-th row of B_plus matrix
+        // B_plus is stored as n_attributes rows × m columns
+        // Each row is m polynomials (m × PARAM_N scalars)
+        poly_matrix B_plus_i = poly_matrix_element(mpk->B_plus, PARAM_M, attr->index, 0);
         
-        // For simplicity: compute dot product and add to first component
-        // TODO: Proper module arithmetic here - this is a simplified version
+        // Compute dot product: B+_i · ωi where both are m-dimensional vectors
+        // Result is a single polynomial in R_q
         poly temp_result = (poly)calloc(PARAM_N, sizeof(scalar));
         
         for (uint32_t j = 0; j < PARAM_M; j++) {
-            poly B_ij = poly_matrix_element(B_plus_i, PARAM_M, 0, j);
-            poly omega_ij = poly_matrix_element(usk->omega_i[i], PARAM_M, 0, j);
+            // B_plus_i[j] is the j-th polynomial in the row
+            poly B_ij = &B_plus_i[j * PARAM_N];
+            
+            // omega_i[i][j] is the j-th polynomial in the omega_i vector
+            poly omega_ij = &usk->omega_i[i][j * PARAM_N];
             
             // Multiply polynomials in CRT domain
             double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
@@ -94,6 +98,8 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
         add_poly(sum_0, sum_0, temp_result, PARAM_N - 1);
         free(temp_result);
+        
+        printf("[KeyGen]     Attribute %d processed\n", i+1);
     }
     
     // Copy β to target's first component

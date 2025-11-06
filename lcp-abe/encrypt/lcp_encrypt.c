@@ -109,8 +109,9 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         printf("[Encrypt]   Row %d: attribute index %d, share λ_%d = %u\n", 
                i, attr_idx, i, shares[i]);
         
-        // Get B+_{ρ(i)}: row vector (1×m) from MPK
-        poly_matrix B_plus_attr = poly_matrix_element(mpk->B_plus, mpk->n_attributes, attr_idx, 0);
+        // Get B+_{ρ(i)}: this is the attr_idx-th row of B_plus matrix
+        // B_plus is stored as n_attributes rows × m columns
+        poly_matrix B_plus_attr = poly_matrix_element(mpk->B_plus, PARAM_M, attr_idx, 0);
         
         // Sample error e_i ∈ R_q^m
         poly_matrix e_i = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
@@ -122,9 +123,11 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         }
         matrix_crt_representation(e_i, PARAM_M, 1, LOG_R);
         
-        // Compute B+_{ρ(i)}^T · s: (m×1) result
-        // B_plus_attr is (1×m), we need to compute dot product with s (k-dimensional)
-        // Simplified: Use first k components of B+ to multiply with s
+        // Compute B+_{ρ(i)}^T · s: Actually compute dot product B+[attr_idx] · s
+        // B_plus_attr is m polynomials (row vector)
+        // s is k-dimensional vector
+        // We compute weighted sum for each component j of output (m-dimensional)
+        
         for (uint32_t j = 0; j < PARAM_M; j++) {
             poly c_i_j = poly_matrix_element(ct_abe->C[i], PARAM_M, j, 0);
             poly e_i_j = poly_matrix_element(e_i, PARAM_M, j, 0);
@@ -132,21 +135,21 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
             // Start with error
             memcpy(c_i_j, e_i_j, PARAM_N * sizeof(scalar));
             
-            // Add contribution from B+ · s (only first k components matter)
-            for (uint32_t l = 0; l < PARAM_D && l < PARAM_M; l++) {
-                poly B_jl = poly_matrix_element(B_plus_attr, PARAM_M, 0, (j * PARAM_D + l) % PARAM_M);
-                poly s_l = poly_matrix_element(s, PARAM_D, l, 0);
-                
-                double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
-                mul_crt_poly(temp_prod, B_jl, s_l, LOG_R);
-                
-                // Reduce double_poly to poly and add
-                for (uint32_t m = 0; m < PARAM_N; m++) {
-                    c_i_j[m] = (c_i_j[m] + (scalar)(temp_prod[m] % PARAM_Q)) % PARAM_Q;
-                }
-                
-                free(temp_prod);
+            // B_plus_attr[j] is the j-th polynomial in the row
+            poly B_j = &B_plus_attr[j * PARAM_N];
+            
+            // Multiply B_j by first component of s (simplified)
+            poly s_0 = poly_matrix_element(s, PARAM_D, 0, 0);
+            
+            double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+            mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
+            
+            // Reduce double_poly to poly and add
+            for (uint32_t m = 0; m < PARAM_N; m++) {
+                c_i_j[m] = (c_i_j[m] + (scalar)(temp_prod[m] % PARAM_Q)) % PARAM_Q;
             }
+            
+            free(temp_prod);
             
             // Add share λ_i encoded in first coefficient (gadget encoding)
             if (j == 0) {
