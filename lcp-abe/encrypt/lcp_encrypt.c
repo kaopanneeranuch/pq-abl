@@ -148,12 +148,15 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
             double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
             mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
             
-            // Reduce double_poly to poly and add
-            for (uint32_t m = 0; m < PARAM_N; m++) {
-                c_i_j[m] = (c_i_j[m] + (scalar)(temp_prod[m] % PARAM_Q)) % PARAM_Q;
-            }
+            // Properly reduce double_poly in CRT domain to poly
+            poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            reduce_double_crt_poly(reduced, temp_prod, LOG_R);
+            
+            // Add to c_i_j
+            add_poly(c_i_j, c_i_j, reduced, PARAM_N - 1);
             
             free(temp_prod);
+            free(reduced);
             
             // Add share λ_i encoded in first coefficient (gadget encoding)
             if (j == 0) {
@@ -187,11 +190,15 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     poly s_0 = poly_matrix_element(s, PARAM_D, 0, 0);
     mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
     
-    // Reduce and add
-    for (uint32_t i = 0; i < PARAM_N; i++) {
-        ct_abe->ct_key[i] = (ct_abe->ct_key[i] + (scalar)(temp_prod[i] % PARAM_Q)) % PARAM_Q;
-    }
+    // Properly reduce double_poly in CRT domain to poly
+    poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+    reduce_double_crt_poly(reduced, temp_prod, LOG_R);
+    
+    // Add to ct_key
+    add_poly(ct_abe->ct_key, ct_abe->ct_key, reduced, PARAM_N - 1);
+    
     free(temp_prod);
+    free(reduced);
     
     // Encode K_log into polynomial (pack bytes into coefficients)
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {

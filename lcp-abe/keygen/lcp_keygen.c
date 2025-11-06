@@ -144,17 +144,36 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             if (j < 2) {
                 printf("[KeyGen]         [j=%d] mul_crt_poly completed, temp_prod[0]=%lu\n", 
                        j, (unsigned long)temp_prod[0]);
+                printf("[KeyGen]         [j=%d] Reducing double_poly to poly...\n", j);
             }
             
-            // Reduce and add to accumulator
-            for (uint32_t k = 0; k < PARAM_N; k++) {
-                temp_result[k] = (temp_result[k] + (scalar)(temp_prod[k] % PARAM_Q)) % PARAM_Q;
+            // Allocate temporary poly for the reduced result
+            poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (!reduced) {
+                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate reduced poly at j=%d\n", j);
+                free(temp_prod);
+                free(temp_result);
+                free(target);
+                free(sum_term);
+                return -1;
             }
             
-            free(temp_prod);
+            // Properly reduce double_poly in CRT domain to poly
+            reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             
             if (j < 2) {
-                printf("[KeyGen]         [j=%d] Freed temp_prod, temp_result[0]=%u\n", 
+                printf("[KeyGen]         [j=%d] Reduced, reduced[0]=%u\n", j, reduced[0]);
+            }
+            
+            // Add to accumulator
+            add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
+            
+            // Free both temporary allocations
+            free(temp_prod);
+            free(reduced);
+            
+            if (j < 2) {
+                printf("[KeyGen]         [j=%d] Freed buffers, temp_result[0]=%u\n", 
                        j, temp_result[0]);
             }
         }
