@@ -17,6 +17,7 @@ endif()
 
 # Include directories
 include_directories(
+    ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/lcp-abe/common
     ${CMAKE_SOURCE_DIR}/lcp-abe/util
     ${CMAKE_SOURCE_DIR}/lcp-abe/policy
