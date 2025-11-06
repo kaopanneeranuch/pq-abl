@@ -13,8 +13,9 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     // Initialize Module_BFRS global structures (must be called before any crypto operations)
     static int initialized = 0;
     if (!initialized) {
-        printf("[Setup] Initializing Module_BFRS (CRT trees, lattice coefficients)...\n");
+        printf("[Setup] Initializing Module_BFRS (CRT trees, roots of unity, lattice coefficients)...\n");
         init_crt_trees();
+        init_cplx_roots_of_unity();
         init_D_lattice_coeffs();
         initialized = 1;
     }
