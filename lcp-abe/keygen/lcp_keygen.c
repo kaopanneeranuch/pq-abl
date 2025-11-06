@@ -107,19 +107,49 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // Step 4: Use Gaussian sampling to compute sk_i such that A_i · sk_i = target
         // where A_i = A + f_i * g^T (augmented matrix for attribute i)
         
+        printf("[KeyGen]       DEBUG: Allocating f_i_inv...\n");
         // Compute f_i's inverse and put it in CRT domain (required by sample_pre_target)
         poly f_i_inv = (poly)calloc(PARAM_N, sizeof(scalar));
+        
+        printf("[KeyGen]       DEBUG: Computing inverse of f_i...\n");
+        printf("[KeyGen]       DEBUG: f_i[0]=%u, f_i[1]=%u, f_i[31]=%u\n", 
+               f_i[0], f_i[1], f_i[31]);
         invert_poly(f_i_inv, f_i, PARAM_N, 1);
+        
+        printf("[KeyGen]       DEBUG: f_i_inv[0]=%u, f_i_inv[1]=%u\n", 
+               f_i_inv[0], f_i_inv[1]);
+        
+        // Check if inversion succeeded (f_i_inv should not be all zeros)
+        int is_zero = 1;
+        for (uint32_t k = 0; k < PARAM_N; k++) {
+            if (f_i_inv[k] != 0) {
+                is_zero = 0;
+                break;
+            }
+        }
+        if (is_zero) {
+            fprintf(stderr, "[KeyGen] ERROR: f_i inversion failed - result is zero!\n");
+            free(f_i_inv);
+            free(f_i);
+            free(target);
+            free(u_i);
+            return -1;
+        }
+        
+        printf("[KeyGen]       DEBUG: Converting f_i_inv to CRT domain...\n");
         crt_representation(f_i_inv, LOG_R);
         
+        printf("[KeyGen]       DEBUG: Constructing augmented matrix A_i...\n");
         // Construct augmented matrix A_i = A + f_i * g^T
         // This modifies mpk->A temporarily to include attribute-specific component
         construct_A_m(mpk->A, f_i);
         
+        printf("[KeyGen]       DEBUG: Calling sample_pre_target...\n");
         // Sample preimage: find sk_i such that A_i · sk_i = target
         sample_pre_target(usk->sk_components[idx], mpk->A, msk->T,
                          msk->cplx_T, msk->sch_comp, f_i_inv, target);
         
+        printf("[KeyGen]       DEBUG: Restoring matrix A...\n");
         // Restore A to original state by removing f_i * g^T
         deconstruct_A_m(mpk->A, f_i);
         
