@@ -94,8 +94,10 @@ void msk_init(MasterSecretKey *msk) {
     msk->T = (poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N, sizeof(scalar));
     
     // Allocate complex representations for Gaussian sampling
-    msk->cplx_T = (cplx_poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * SMALL_DEGREE, sizeof(cplx));
-    msk->sch_comp = (cplx_poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * SMALL_DEGREE, sizeof(cplx));
+    // cplx_T has same dimensions as T
+    msk->cplx_T = (cplx_poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N, sizeof(cplx));
+    // sch_comp is a triangular matrix: PARAM_D * (2*PARAM_D + 1) blocks, each of size PARAM_N
+    msk->sch_comp = (cplx_poly_matrix)calloc(PARAM_N * PARAM_D * (2 * PARAM_D + 1), sizeof(cplx));
 }
 
 void msk_free(MasterSecretKey *msk) {

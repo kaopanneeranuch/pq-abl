@@ -74,8 +74,9 @@ int lcp_save_mpk(const MasterPublicKey *mpk, const char *filename) {
     fwrite(&mpk->n_attributes, sizeof(uint32_t), 1, fp);
     fwrite(&mpk->matrix_dim, sizeof(uint32_t), 1, fp);
     
-    // Write matrix A
-    size_t a_size = PARAM_D * PARAM_D * PARAM_N;
+    // Write matrix A (size: (PARAM_M - PARAM_D) × PARAM_D × PARAM_N)
+    size_t a_rows = PARAM_D * (PARAM_K + 2) - PARAM_D;  // PARAM_M - PARAM_D
+    size_t a_size = a_rows * PARAM_D * PARAM_N;
     fwrite(mpk->A, sizeof(scalar), a_size, fp);
     
     // Write matrix U
@@ -102,8 +103,9 @@ int lcp_load_mpk(MasterPublicKey *mpk, const char *filename) {
     // Initialize MPK
     mpk_init(mpk, n_attributes);
     
-    // Read matrix A
-    size_t a_size = PARAM_D * PARAM_D * PARAM_N;
+    // Read matrix A (size: (PARAM_M - PARAM_D) × PARAM_D × PARAM_N)
+    size_t a_rows = PARAM_D * (PARAM_K + 2) - PARAM_D;  // PARAM_M - PARAM_D
+    size_t a_size = a_rows * PARAM_D * PARAM_N;
     fread(mpk->A, sizeof(scalar), a_size, fp);
     
     // Read matrix U
@@ -122,14 +124,15 @@ int lcp_save_msk(const MasterSecretKey *msk, const char *filename) {
         return -1;
     }
     
-    // Write trapdoor T
-    size_t t_size = PARAM_D * PARAM_D * PARAM_N;
+    // Write trapdoor T (size: 2*PARAM_D × PARAM_D*PARAM_K × PARAM_N)
+    size_t t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
     fwrite(msk->T, sizeof(scalar), t_size, fp);
     
     // Write complex representations
-    size_t cplx_size = PARAM_D * PARAM_D * SMALL_DEGREE;
-    fwrite(msk->cplx_T, sizeof(cplx), cplx_size, fp);
-    fwrite(msk->sch_comp, sizeof(cplx), cplx_size, fp);
+    size_t cplx_t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
+    size_t sch_comp_size = PARAM_N * PARAM_D * (2 * PARAM_D + 1);
+    fwrite(msk->cplx_T, sizeof(cplx), cplx_t_size, fp);
+    fwrite(msk->sch_comp, sizeof(cplx), sch_comp_size, fp);
     
     fclose(fp);
     printf("[Setup] MSK saved to %s (keep secret!)\n", filename);
@@ -146,14 +149,15 @@ int lcp_load_msk(MasterSecretKey *msk, const char *filename) {
     // Initialize MSK
     msk_init(msk);
     
-    // Read trapdoor T
-    size_t t_size = PARAM_D * PARAM_D * PARAM_N;
+    // Read trapdoor T (size: 2*PARAM_D × PARAM_D*PARAM_K × PARAM_N)
+    size_t t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
     fread(msk->T, sizeof(scalar), t_size, fp);
     
     // Read complex representations
-    size_t cplx_size = PARAM_D * PARAM_D * SMALL_DEGREE;
-    fread(msk->cplx_T, sizeof(cplx), cplx_size, fp);
-    fread(msk->sch_comp, sizeof(cplx), cplx_size, fp);
+    size_t cplx_t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
+    size_t sch_comp_size = PARAM_N * PARAM_D * (2 * PARAM_D + 1);
+    fread(msk->cplx_T, sizeof(cplx), cplx_t_size, fp);
+    fread(msk->sch_comp, sizeof(cplx), sch_comp_size, fp);
     
     fclose(fp);
     printf("[Setup] MSK loaded from %s\n", filename);
