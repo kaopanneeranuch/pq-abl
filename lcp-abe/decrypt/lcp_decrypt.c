@@ -14,15 +14,21 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                     const UserSecretKey *usk,
                     const MasterPublicKey *mpk,
                     uint8_t key_out[AES_KEY_SIZE]) {
-    printf("[Decrypt] LCP-ABE decrypting ciphertext...\n");
+    printf("\n[Decrypt] ===== LCP-ABE Decryption Start =====\n");
+    printf("[Decrypt] CT_ABE Policy: '%s'\n", ct_abe->policy.expression);
+    printf("[Decrypt] CT_ABE Components: %u\n", ct_abe->n_components);
+    printf("[Decrypt] User has %u attributes\n", usk->attr_set.count);
     
     // Check if user attributes satisfy policy
+    printf("[Decrypt] Checking policy satisfaction...\n");
     if (!lsss_check_satisfaction(&ct_abe->policy, &usk->attr_set)) {
-        fprintf(stderr, "Error: User attributes do not satisfy policy\n");
+        fprintf(stderr, "[Decrypt] ✗ Error: User attributes do not satisfy policy\n");
         return -1;
     }
+    printf("[Decrypt] ✓ Policy satisfied!\n");
+    printf("[Decrypt] ✓ Policy satisfied!\n");
     
-    printf("[Decrypt] Policy satisfied! Computing reconstruction coefficients...\n");
+    printf("[Decrypt] Computing reconstruction coefficients...\n");
     
     // Compute reconstruction coefficients
     scalar coefficients[MAX_ATTRIBUTES];
@@ -30,6 +36,9 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     lsss_compute_coefficients(&ct_abe->policy, &usk->attr_set, coefficients, &n_coeffs);
     
     printf("[Decrypt] Using %d attributes for decryption\n", n_coeffs);
+    for (uint32_t i = 0; i < n_coeffs && i < 5; i++) {
+        printf("[Decrypt]   Coefficient[%d] = %u\n", i, coefficients[i]);
+    }
     
     // ========================================================================
     // Decryption Algorithm:
@@ -102,7 +111,12 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     free(partial_sum);
     free(recovered);
     
-    printf("[Decrypt] Key recovered successfully\n");
+    printf("[Decrypt] ✓ K_log recovered successfully (first 16 bytes): ");
+    for (int i = 0; i < 16; i++) {
+        printf("%02x", key_out[i]);
+    }
+    printf("\n");
+    printf("[Decrypt] ===== LCP-ABE Decryption End =====\n\n");
     return 0;
 }
 
@@ -115,6 +129,8 @@ int decrypt_log_symmetric(const SymmetricCiphertext *ct_sym,
                          const LogMetadata *metadata,
                          uint8_t **plaintext_out,
                          size_t *plaintext_len) {
+    printf("[Decrypt AES] Decrypting symmetric ciphertext (length: %u)\n", ct_sym->ct_len);
+    
     // Allocate plaintext buffer
     *plaintext_out = (uint8_t*)malloc(ct_sym->ct_len);
     if (!*plaintext_out) {
@@ -132,6 +148,13 @@ int decrypt_log_symmetric(const SymmetricCiphertext *ct_sym,
                              metadata->action_type,
                              metadata->service_name);
     
+    printf("[Decrypt AES] AAD: %.*s\n", (int)aad_len, aad);
+    printf("[Decrypt AES] Key (first 16 bytes): ");
+    for (int i = 0; i < 16; i++) {
+        printf("%02x", key[i]);
+    }
+    printf("\n");
+    
     // Decrypt with AES-GCM
     int result = aes_gcm_decrypt(ct_sym->ciphertext, ct_sym->ct_len,
                                 key, ct_sym->nonce,
@@ -142,10 +165,11 @@ int decrypt_log_symmetric(const SymmetricCiphertext *ct_sym,
     if (result != 0) {
         free(*plaintext_out);
         *plaintext_out = NULL;
-        fprintf(stderr, "Error: AES-GCM decryption or authentication failed\n");
+        fprintf(stderr, "[Decrypt AES] ✗ Error: AES-GCM decryption or authentication failed\n");
         return -1;
     }
     
+    printf("[Decrypt AES] ✓ AES-GCM decryption successful\n");
     return 0;
 }
 
@@ -211,9 +235,11 @@ int decrypt_microbatch(const Microbatch *batch,
 // ============================================================================
 
 int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
+    printf("[Load] Opening CT_obj file: %s\n", filename);
+    
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
-        fprintf(stderr, "Error: Cannot open file %s\n", filename);
+        fprintf(stderr, "[Load] ✗ Error: Cannot open file %s\n", filename);
         return -1;
     }
     
@@ -221,12 +247,15 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     
     // Read metadata
     if (fread(&log->metadata, sizeof(LogMetadata), 1, fp) != 1) {
+        fprintf(stderr, "[Load] ✗ Error: Failed to read metadata\n");
         fclose(fp);
         return -1;
     }
+    printf("[Load] ✓ Loaded metadata\n");
     
     // Read symmetric ciphertext (CT_sym)
     if (fread(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp) != 1) {
+        fprintf(stderr, "[Load] ✗ Error: Failed to read ct_len\n");
         fclose(fp);
         return -1;
     }
@@ -235,10 +264,16 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     fread(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
     fread(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
     fread(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
+    printf("[Load] ✓ Loaded CT_sym (size: %u bytes)\n", log->ct_sym.ct_len);
     
     // Read ABE ciphertext (CT_ABE)
     fread(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
     fread(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp);
+    printf("[Load] ✓ Loaded CT_ABE policy: '%s' (%u components)\n", 
+           log->ct_abe.policy.expression, log->ct_abe.n_components);
+    
+    // Parse the policy to extract attribute indices
+    policy_parse(log->ct_abe.policy.expression, &log->ct_abe.policy);
     
     // Allocate and read C0
     size_t c0_size = PARAM_M * PARAM_N;
@@ -266,6 +301,7 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     }
     
     fclose(fp);
+    printf("[Load] ✓ Successfully loaded complete CT_obj\n");
     return 0;
 }
 
@@ -296,12 +332,14 @@ int decrypt_ctobj_batch(const char **filenames,
     uint32_t abe_decryptions = 0;
     
     for (uint32_t i = 0; i < n_files; i++) {
-        printf("\n[Decrypt] File %d/%d: %s\n", i + 1, n_files, filenames[i]);
+        printf("\n========================================\n");
+        printf("[Decrypt] File %d/%d: %s\n", i + 1, n_files, filenames[i]);
+        printf("========================================\n");
         
         // Load CT_obj
         EncryptedLogObject log;
         if (load_ctobj_file(filenames[i], &log) != 0) {
-            fprintf(stderr, "[Decrypt] Failed to load file\n");
+            fprintf(stderr, "[Decrypt] ✗ Failed to load file\n");
             continue;
         }
         

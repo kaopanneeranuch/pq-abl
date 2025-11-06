@@ -10,6 +10,10 @@
 // Policy Parsing
 // ============================================================================
 
+// Hash attribute name to universe index [0, 127]
+// Used by both policy parsing and attribute set creation to ensure consistency
+uint32_t attr_name_to_index(const char *attr_name);
+
 // Parse policy expression into AccessPolicy structure
 // Example: "(user_role:admin AND team:storage-team)"
 int policy_parse(const char *expression, AccessPolicy *policy);

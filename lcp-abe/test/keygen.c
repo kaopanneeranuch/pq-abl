@@ -4,6 +4,7 @@
 #include "lcp-abe/common/lcp_types.h"
 #include "lcp-abe/setup/lcp_setup.h"
 #include "lcp-abe/keygen/lcp_keygen.h"
+#include "lcp-abe/policy/lcp_policy.h"
 #include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
 
 int main(void) {
@@ -23,10 +24,23 @@ int main(void) {
     /* Build attribute set */
     AttributeSet attrs;
     attribute_set_init(&attrs);
-    Attribute a1; attribute_init(&a1, "user_role:admin", 0);
-    Attribute a2; attribute_init(&a2, "team:storage-team", 1);
+    
+    // Use the same hash function as policy parsing to compute indices
+    // This ensures attribute indices match between encryption and decryption
+    Attribute a1;
+    Attribute a2;
+    
+    // Hash "user_role:admin" to get consistent index
+    attribute_init(&a1, "user_role:admin", attr_name_to_index("user_role:admin"));
+    // Hash "team:storage-team" to get consistent index  
+    attribute_init(&a2, "team:storage-team", attr_name_to_index("team:storage-team"));
+    
     attribute_set_add(&attrs, &a1);
     attribute_set_add(&attrs, &a2);
+    
+    printf("[KeyGen] User attributes:\n");
+    printf("  - %s (index %u)\n", a1.name, a1.index);
+    printf("  - %s (index %u)\n", a2.name, a2.index);
 
     UserSecretKey sk;
     usk_init(&sk, 2);

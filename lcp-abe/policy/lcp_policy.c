@@ -10,7 +10,7 @@
 // ============================================================================
 
 // Simple hash function to map attribute name to index [0, 127]
-static uint32_t attr_name_to_index(const char *attr_name) {
+uint32_t attr_name_to_index(const char *attr_name) {
     uint32_t hash = 5381;
     int c;
     while ((c = *attr_name++)) {
@@ -267,20 +267,44 @@ int lsss_generate_shares(const AccessPolicy *policy, scalar secret, scalar *shar
 
 // Check if attribute set satisfies policy
 int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr_set) {
-    // Count how many policy attributes are in the attribute set
-    uint32_t match_count = 0;
+    printf("[Policy Check] Policy: %s\n", policy->expression);
+    printf("[Policy Check] Policy requires %d attributes:\n", policy->attr_count);
     for (uint32_t i = 0; i < policy->attr_count; i++) {
-        // Check if attribute i is in attr_set
-        // (simplified: check by index for now)
-        if (i < attr_set->count) {
-            match_count++;
+        printf("[Policy Check]   - Index %u\n", policy->attr_indices[i]);
+    }
+    
+    printf("[Policy Check] User has %d attributes:\n", attr_set->count);
+    for (uint32_t i = 0; i < attr_set->count; i++) {
+        printf("[Policy Check]   - %s (index %u)\n", 
+               attr_set->attrs[i].name, attr_set->attrs[i].index);
+    }
+    
+    // Count how many policy attributes match user's attributes
+    uint32_t match_count = 0;
+    
+    for (uint32_t i = 0; i < policy->attr_count; i++) {
+        uint32_t policy_attr_index = policy->attr_indices[i];
+        
+        // Check if this policy attribute index matches any user attribute index
+        for (uint32_t j = 0; j < attr_set->count; j++) {
+            if (attr_set->attrs[j].index == policy_attr_index) {
+                match_count++;
+                printf("[Policy Check] ✓ Matched policy attr index %u with user attr '%s'\n",
+                       policy_attr_index, attr_set->attrs[j].name);
+                break;
+            }
         }
     }
+    
+    printf("[Policy Check] Matched %d/%d policy attributes\n", match_count, policy->attr_count);
     
     // Check satisfaction based on policy type
     if (policy->is_threshold) {
         // Threshold policy: need at least k matching attributes
-        return match_count >= policy->threshold;
+        int satisfied = (match_count >= policy->threshold);
+        printf("[Policy Check] Threshold policy: need %d, have %d → %s\n",
+               policy->threshold, match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
+        return satisfied;
     }
     
     // Check if policy is AND or OR
@@ -289,13 +313,22 @@ int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr
     
     if (is_and) {
         // Need ALL attributes
-        return (match_count == policy->attr_count);
+        int satisfied = (match_count == policy->attr_count);
+        printf("[Policy Check] AND policy: need all %d, have %d → %s\n",
+               policy->attr_count, match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
+        return satisfied;
     } else if (is_or) {
         // Need at least ONE attribute
-        return (match_count > 0);
+        int satisfied = (match_count > 0);
+        printf("[Policy Check] OR policy: need ≥1, have %d → %s\n",
+               match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
+        return satisfied;
     } else {
         // Default: AND
-        return (match_count == policy->attr_count);
+        int satisfied = (match_count == policy->attr_count);
+        printf("[Policy Check] Default (AND) policy: need all %d, have %d → %s\n",
+               policy->attr_count, match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
+        return satisfied;
     }
 }
 
