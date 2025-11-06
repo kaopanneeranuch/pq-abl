@@ -4,8 +4,15 @@
 #include "lcp-abe/common/lcp_types.h"
 #include "lcp-abe/setup/lcp_setup.h"
 #include "lcp-abe/keygen/lcp_keygen.h"
+#include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
 
 int main(void) {
+    // Initialize Module_BFRS components (required for CRT operations)
+    printf("[KeyGen Test] Initializing Module_BFRS...\n");
+    init_crt_trees();
+    init_cplx_roots_of_unity();
+    init_D_lattice_coeffs();
+    
     MasterPublicKey mpk;
     MasterSecretKey msk;
     if (lcp_load_mpk(&mpk, "keys/MPK.bin") != 0 ||

@@ -5,8 +5,15 @@
 #include "lcp-abe/setup/lcp_setup.h"
 #include "lcp-abe/keygen/lcp_keygen.h"
 #include "lcp-abe/decrypt/lcp_decrypt.h"
+#include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
 
 int main(void) {
+    // Initialize Module_BFRS components (required for polynomial operations)
+    printf("[Decrypt Test] Initializing Module_BFRS...\n");
+    init_crt_trees();
+    init_cplx_roots_of_unity();
+    init_D_lattice_coeffs();
+    
     MasterPublicKey mpk;
     UserSecretKey sk;
     if (lcp_load_mpk(&mpk, "keys/MPK.bin") != 0 ||
