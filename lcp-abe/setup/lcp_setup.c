@@ -140,14 +140,17 @@ int lcp_save_msk(const MasterSecretKey *msk, const char *filename) {
 }
 
 int lcp_load_msk(MasterSecretKey *msk, const char *filename) {
+    printf("[DEBUG] lcp_load_msk called with filename: %s\n", filename);
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
         fprintf(stderr, "Error: Cannot open file %s for reading\n", filename);
         return -1;
     }
+    printf("[DEBUG] File opened successfully\n");
     
     // Initialize MSK
     msk_init(msk);
+    printf("[DEBUG] msk_init completed\n");
     
     // Read trapdoor T (size: 2*PARAM_D × PARAM_D*PARAM_K × PARAM_N)
     size_t t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
