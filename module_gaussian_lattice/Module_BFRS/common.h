@@ -11,7 +11,8 @@
 
 //#define TESTING_ZETA
 
-// === FASTEST: q = 8388593, d = 3, r = 8 ===
+/*
+// === FASTEST: q = 8388593, d = 3, r = 8 === (COMMENTED OUT - seems unstable)
 #define PARAM_Q 8388593 // modulus q (23-bit)
 #define PARAM_K 23 // size of q
 #define PARAM_N 256 // degree of polynomials
@@ -24,9 +25,9 @@
 #define PARAM_B 2
 #define PARAM_TAU 12
 #define PARAM_GAMMA 12
+*/
 
-/*
-// q = 1073741441, d = 4, r = 64
+// q = 1073741441, d = 4, r = 64 (MORE STABLE)
 #define PARAM_Q 1073741441 // modulus q
 #define PARAM_K 30 // size of q
 #define PARAM_N 256 // degree of polynomials
@@ -36,7 +37,9 @@
 #define PARAM_ALPHA (48.34) // Gaussian parameter (sampling perturbations)
 #define PARAM_ZETA (83832.0) // Gaussian parameter (presampling)
 #define PARAM_T 12 // Tailcut
-*/
+#define PARAM_B 2
+#define PARAM_TAU 12
+#define PARAM_GAMMA 12
 
 /*// q = 1073741441, d = 5, r = 64
 #define PARAM_Q 1073741441 // modulus q
