@@ -20,7 +20,7 @@ gcc -O3 \
 
 # KeyGen (produce a user SK for an attribute set)
 gcc -O3 \
-  -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/keygen -I./lcp-abe/util \
+  -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/keygen -I./lcp-abe/setup -I./lcp-abe/util \
   lcp-abe/test/keygen.c \
   -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
   -o lcp-abe/test/test_keygen

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include "lcp-abe/common/lcp_types.h"
+#include "lcp-abe/setup/lcp_setup.h"
 #include "lcp-abe/encrypt/lcp_encrypt.h"
 
 int main(void) {
