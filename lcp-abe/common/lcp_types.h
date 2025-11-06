@@ -38,28 +38,30 @@ typedef struct {
     uint32_t is_threshold;             // Flag: 1 if threshold policy, 0 otherwise
 } AccessPolicy;
 
-// Master Public Key (MPK)
+// Master Public Key (MPK) - Paper's Algorithm 1
 typedef struct {
-    poly_matrix A;                     // Public random matrix A ∈ R_q^(d×d)
-    poly_matrix U;                     // Public matrix U = [u_1 | u_2 | ... | u_n]
-                                       // where n = number of attributes
-    uint32_t n_attributes;             // Total number of attributes in universe
-    uint32_t matrix_dim;               // Dimension d
+    poly_matrix A;                     // Public random matrix A ∈ R_q^(k×m) where k=PARAM_D, m=PARAM_M
+    poly_matrix B_plus;                // B+_i vectors: n_attributes × m matrix (stored as rows)
+    poly_matrix B_minus;               // B-_i vectors: n_attributes × m matrix (stored as rows)
+    poly beta;                         // Challenge element β ∈ Rq
+    uint32_t n_attributes;             // Total number of attributes in universe ℓ
+    uint32_t k;                        // Module rank k (= PARAM_D)
+    uint32_t m;                        // Module dimension m (= PARAM_M)
 } MasterPublicKey;
 
-// Master Secret Key (MSK)
+// Master Secret Key (MSK) - Paper's Algorithm 1
 typedef struct {
-    poly_matrix T;                     // Trapdoor T for matrix A
-    cplx_poly_matrix cplx_T;          // Complex representation of T
-    cplx_poly_matrix sch_comp;        // Schur complement for Gaussian sampling
+    poly_matrix T;                     // Trapdoor TA for matrix A (2k × m in Module_BFRS)
+    cplx_poly_matrix cplx_T;          // Complex representation of T (for Gaussian sampling)
+    cplx_poly_matrix sch_comp;        // Schur complement (for Gaussian sampling)
 } MasterSecretKey;
 
-// User Secret Key (SK_S for attribute set S)
+// User Secret Key (SK_Y for attribute set Y) - Paper's Algorithm 2
 typedef struct {
-    AttributeSet attr_set;             // Set of attributes S
-    poly_matrix *sk_components;        // Secret key components for each attribute
-                                       // sk_i ∈ R_q^d for each attribute i ∈ S
-    uint32_t n_components;
+    AttributeSet attr_set;             // Set of attributes Y
+    poly_matrix omega_A;               // ωA ∈ R^m (m-dimensional vector)
+    poly_matrix *omega_i;              // {ωi}_{xi∈Y}: one m-dimensional vector per attribute
+    uint32_t n_components;             // Number of attributes in Y
 } UserSecretKey;
 
 // ABE Ciphertext (CT_ABE)

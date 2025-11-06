@@ -58,19 +58,27 @@ void policy_free(AccessPolicy *policy) {
 }
 
 // ============================================================================
-// Master Public Key Functions
+// Master Public Key Functions - Paper's Algorithm 1
 // ============================================================================
 
 void mpk_init(MasterPublicKey *mpk, uint32_t n_attributes) {
     mpk->n_attributes = n_attributes;
-    mpk->matrix_dim = PARAM_D;
+    mpk->k = PARAM_D;                     // Module rank k
+    mpk->m = PARAM_M;                     // Module dimension m = d*(k_param+2)
     
-    // Allocate matrices
-    // A should be (PARAM_M - PARAM_D) × PARAM_D, where PARAM_M = PARAM_D * (PARAM_K + 2)
-    // TrapGen expects this size for the extended matrix structure
-    size_t a_rows = PARAM_D * (PARAM_K + 2) - PARAM_D;  // PARAM_M - PARAM_D
-    mpk->A = (poly_matrix)calloc(a_rows * PARAM_D * PARAM_N, sizeof(scalar));
-    mpk->U = (poly_matrix)calloc(PARAM_D * n_attributes * PARAM_N, sizeof(scalar));
+    // A is k×m matrix, but Module_BFRS TrapGen outputs (m-k)×k, so we store that format
+    // A has implicit identity I_k, so we store the (m-k) × k part
+    size_t a_size = (PARAM_M - PARAM_D) * PARAM_D * PARAM_N;
+    mpk->A = (poly_matrix)calloc(a_size, sizeof(scalar));
+    
+    // B_plus: ℓ × m matrix (one 1×m vector per attribute)
+    mpk->B_plus = (poly_matrix)calloc(n_attributes * PARAM_M * PARAM_N, sizeof(scalar));
+    
+    // B_minus: ℓ × m matrix (one 1×m vector per attribute)
+    mpk->B_minus = (poly_matrix)calloc(n_attributes * PARAM_M * PARAM_N, sizeof(scalar));
+    
+    // β: single polynomial in Rq
+    mpk->beta = (poly)calloc(PARAM_N, sizeof(scalar));
 }
 
 void mpk_free(MasterPublicKey *mpk) {
@@ -78,9 +86,17 @@ void mpk_free(MasterPublicKey *mpk) {
         free(mpk->A);
         mpk->A = NULL;
     }
-    if (mpk->U) {
-        free(mpk->U);
-        mpk->U = NULL;
+    if (mpk->B_plus) {
+        free(mpk->B_plus);
+        mpk->B_plus = NULL;
+    }
+    if (mpk->B_minus) {
+        free(mpk->B_minus);
+        mpk->B_minus = NULL;
+    }
+    if (mpk->beta) {
+        free(mpk->beta);
+        mpk->beta = NULL;
     }
 }
 
@@ -116,31 +132,38 @@ void msk_free(MasterSecretKey *msk) {
 }
 
 // ============================================================================
-// User Secret Key Functions
+// User Secret Key Functions - Paper's Algorithm 2
 // ============================================================================
 
 void usk_init(UserSecretKey *usk, uint32_t n_components) {
     attribute_set_init(&usk->attr_set);
     usk->n_components = n_components;
-    usk->sk_components = (poly_matrix*)calloc(n_components, sizeof(poly_matrix));
     
-    // Each sk_component is a vector in R_q^m where m = PARAM_M = PARAM_D * (PARAM_K + 2)
-    // This is the output size from sample_pre_target
+    // ωA: single m-dimensional vector
+    usk->omega_A = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+    
+    // {ωi}: one m-dimensional vector per attribute
+    usk->omega_i = (poly_matrix*)calloc(n_components, sizeof(poly_matrix));
     for (uint32_t i = 0; i < n_components; i++) {
-        usk->sk_components[i] = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+        usk->omega_i[i] = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     }
 }
 
 void usk_free(UserSecretKey *usk) {
-    if (usk->sk_components) {
+    if (usk->omega_A) {
+        free(usk->omega_A);
+        usk->omega_A = NULL;
+    }
+    if (usk->omega_i) {
         for (uint32_t i = 0; i < usk->n_components; i++) {
-            if (usk->sk_components[i]) {
-                free(usk->sk_components[i]);
+            if (usk->omega_i[i]) {
+                free(usk->omega_i[i]);
             }
         }
-        free(usk->sk_components);
-        usk->sk_components = NULL;
+        free(usk->omega_i);
+        usk->omega_i = NULL;
     }
+    usk->n_components = 0;
 }
 
 // ============================================================================
