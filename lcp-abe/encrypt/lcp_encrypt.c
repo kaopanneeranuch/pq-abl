@@ -205,8 +205,8 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     
     // Add contribution from A^T · s (simplified: use only identity portion)
     for (uint32_t i = 0; i < PARAM_D && i < PARAM_M; i++) {
-        poly c0_i = poly_matrix_element(ct_abe->C0, PARAM_M, i, 0);
-        poly s_i = poly_matrix_element(s, PARAM_D, i, 0);
+        poly c0_i = poly_matrix_element(ct_abe->C0, 1, i, 0);  // C0 is column vector (m x 1)
+        poly s_i = poly_matrix_element(s, 1, i, 0);            // s is column vector (k x 1)
         add_poly(c0_i, c0_i, s_i, PARAM_N - 1);
     }
     
@@ -233,10 +233,21 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         
         printf("[Encrypt]     B_plus_attr offset: %lu scalars\n", 
                (unsigned long)(attr_idx * PARAM_M * PARAM_N));
+        printf("[Encrypt]     B_plus_attr address: %p\n", (void*)B_plus_attr);
         
         // Sample error e_i ∈ R_q^m
+        printf("[Encrypt]     DEBUG: Allocating e_i (%d x %d = %d scalars)\n",
+               PARAM_M, PARAM_N, PARAM_M * PARAM_N);
         poly_matrix e_i = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+        if (!e_i) {
+            fprintf(stderr, "[Encrypt] ERROR: Failed to allocate e_i\n");
+            goto cleanup_error;
+        }
+        printf("[Encrypt]     DEBUG: e_i allocated at %p\n", (void*)e_i);
+        
+        printf("[Encrypt]     DEBUG: Sampling e_i\n");
         SampleR_matrix_centered((signed_poly_matrix)e_i, PARAM_M, 1, PARAM_SIGMA);
+        printf("[Encrypt]     DEBUG: e_i sampling completed\n");
         
         // Make e_i positive and convert to CRT
         for (int j = 0; j < PARAM_N * PARAM_M; j++) {
