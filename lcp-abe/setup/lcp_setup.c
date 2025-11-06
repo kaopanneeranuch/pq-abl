@@ -151,13 +151,32 @@ int lcp_load_msk(MasterSecretKey *msk, const char *filename) {
     
     // Read trapdoor T (size: 2*PARAM_D × PARAM_D*PARAM_K × PARAM_N)
     size_t t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
-    fread(msk->T, sizeof(scalar), t_size, fp);
+    size_t read_t = fread(msk->T, sizeof(scalar), t_size, fp);
+    if (read_t != t_size) {
+        fprintf(stderr, "Error: Failed to read T from %s (expected %zu, got %zu)\n", 
+                filename, t_size, read_t);
+        fclose(fp);
+        return -1;
+    }
     
     // Read complex representations
     size_t cplx_t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
+    size_t read_cplx_t = fread(msk->cplx_T, sizeof(cplx), cplx_t_size, fp);
+    if (read_cplx_t != cplx_t_size) {
+        fprintf(stderr, "Error: Failed to read cplx_T from %s (expected %zu, got %zu)\n",
+                filename, cplx_t_size, read_cplx_t);
+        fclose(fp);
+        return -1;
+    }
+    
     size_t sch_comp_size = PARAM_N * PARAM_D * (2 * PARAM_D + 1);
-    fread(msk->cplx_T, sizeof(cplx), cplx_t_size, fp);
-    fread(msk->sch_comp, sizeof(cplx), sch_comp_size, fp);
+    size_t read_sch = fread(msk->sch_comp, sizeof(cplx), sch_comp_size, fp);
+    if (read_sch != sch_comp_size) {
+        fprintf(stderr, "Error: Failed to read sch_comp from %s (expected %zu, got %zu)\n",
+                filename, sch_comp_size, read_sch);
+        fclose(fp);
+        return -1;
+    }
     
     fclose(fp);
     printf("[Setup] MSK loaded from %s\n", filename);
