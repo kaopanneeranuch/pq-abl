@@ -76,24 +76,59 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     // Step 3: Generate LSSS shares λ = M · [s_scalar, r_1, ..., r_{n-1}]^T
     // ========================================================================
     printf("[Encrypt] Generating LSSS shares for %d attributes\n", n_rows);
+    printf("[Encrypt]   DEBUG: policy->matrix_rows=%d, matrix_cols=%d\n", 
+           policy->matrix_rows, policy->matrix_cols);
+    printf("[Encrypt]   DEBUG: policy->rho=%p, share_matrix=%p\n", 
+           (void*)policy->rho, (void*)policy->share_matrix);
+    
+    if (!policy->rho) {
+        fprintf(stderr, "[Encrypt] ERROR: policy->rho is NULL!\n");
+        free(s);
+        return -1;
+    }
+    
     scalar secret_scalar = rand() % PARAM_Q;
+    printf("[Encrypt]   DEBUG: Allocating shares array for %d rows\n", n_rows);
     scalar *shares = (scalar*)calloc(n_rows, sizeof(scalar));
+    if (!shares) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate shares\n");
+        free(s);
+        return -1;
+    }
+    
+    printf("[Encrypt]   DEBUG: Calling lsss_generate_shares...\n");
     lsss_generate_shares(policy, secret_scalar, shares);
+    printf("[Encrypt]   DEBUG: lsss_generate_shares completed\n");
     
     // ========================================================================
     // Step 4: Compute C_0 = A^T · s + e_0 (m-dimensional ciphertext header)
     // ========================================================================
     printf("[Encrypt] Computing C_0 = A^T · s + e_0\n");
     
+    printf("[Encrypt]   DEBUG: Allocating e0 (%d x %d = %d scalars)\n", 
+           PARAM_M, PARAM_N, PARAM_M * PARAM_N);
     // Sample small error e_0 ∈ R_q^m
     poly_matrix e0 = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+    if (!e0) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate e0\n");
+        free(s);
+        free(shares);
+        return -1;
+    }
+    printf("[Encrypt]   DEBUG: e0 allocated at %p\n", (void*)e0);
+    
+    printf("[Encrypt]   DEBUG: Sampling error e0 with sigma=%.2f\n", PARAM_SIGMA);
     SampleR_matrix_centered((signed_poly_matrix)e0, PARAM_M, 1, PARAM_SIGMA);
+    printf("[Encrypt]   DEBUG: Sampling completed\n");
     
     // Make e0 positive and convert to CRT
+    printf("[Encrypt]   DEBUG: Making e0 positive (adding PARAM_Q)\n");
     for (int i = 0; i < PARAM_N * PARAM_M; i++) {
         e0[i] += PARAM_Q;
     }
+    printf("[Encrypt]   DEBUG: Converting e0 to CRT domain\n");
     matrix_crt_representation(e0, PARAM_M, 1, LOG_R);
+    printf("[Encrypt]   DEBUG: CRT conversion completed\n");
     
     // Compute A^T · s: transpose of A (k×m) gives (m×k), multiply by s (k×1) gives (m×1)
     // A is stored as (m-k)×k sub-matrix, we need to reconstruct full m×k structure
