@@ -98,16 +98,24 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         }
         
         printf("[KeyGen]     Step 4: Sampling preimage using trapdoor (this may take a few seconds)...\n");
-        // Step 4: Use Gaussian sampling to compute sk_i such that A · sk_i = target
-        // This uses the trapdoor T_A and sample_pre_target function
+        // Step 4: Use Gaussian sampling to compute sk_i such that A_i · sk_i = target
+        // where A_i = A + f_i * g^T (augmented matrix for attribute i)
+        
+        // Compute f_i's inverse and put it in CRT domain (required by sample_pre_target)
         poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));
         h_inv[0] = 1; // Identity polynomial in coefficient domain
-        
-        // Convert h_inv to CRT domain (required by sample_pre_target)
         crt_representation(h_inv, LOG_R);
         
+        // Construct augmented matrix A_i = A + f_i * g^T
+        // This modifies mpk->A temporarily to include attribute-specific component
+        construct_A_m(mpk->A, f_i);
+        
+        // Sample preimage: find sk_i such that A_i · sk_i = target
         sample_pre_target(usk->sk_components[idx], mpk->A, msk->T,
                          msk->cplx_T, msk->sch_comp, h_inv, target);
+        
+        // Restore A to original state by removing f_i * g^T
+        deconstruct_A_m(mpk->A, f_i);
         
         printf("[KeyGen]     Attribute %d complete!\n", idx + 1);
         free(h_inv);
