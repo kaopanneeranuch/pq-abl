@@ -58,19 +58,20 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         
         // Compute inner product: ω_i^T · C_i
-        // C_i is m-dimensional, ω_i is m-dimensional
-        for (uint32_t j = 0; j < PARAM_M && j < PARAM_D; j++) {
-            poly omega_ij = poly_matrix_element(usk->omega_i[i], PARAM_M, j, 0);
-            poly c_i_j = poly_matrix_element(ct_abe->C[i], PARAM_M, j, 0);
+        // C_i is m×1 column vector, ω_i is m×1 column vector
+        // Loop over all m=PARAM_M components
+        for (uint32_t j = 0; j < PARAM_M; j++) {
+            // Both omega_i and C[i] are m×1 column vectors, so nb_col=1
+            poly omega_ij = poly_matrix_element(usk->omega_i[i], 1, j, 0);
+            poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
             
-            double_poly prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+            // Multiply in CRT domain (produces 2*PARAM_N result)
+            double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
             mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
             
-            // Reduce double_poly to poly
+            // Reduce double_poly to poly (stays in CRT domain)
             poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-            for (uint32_t k = 0; k < PARAM_N; k++) {
-                prod_reduced[k] = (scalar)(prod[k] % PARAM_Q);
-            }
+            reduce_double_crt_poly(prod_reduced, prod, LOG_R);
             
             add_poly(temp, temp, prod_reduced, PARAM_N - 1);
             free(prod);
@@ -87,8 +88,11 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         free(temp);
     }
     
-    // Subtract partial sum from ct_key
+    // Subtract partial sum from ct_key (both in CRT domain)
     sub_poly(recovered, recovered, partial_sum, PARAM_N - 1);
+    
+    // Convert recovered from CRT back to coefficient representation
+    coeffs_representation(recovered, LOG_R);
     
     // Extract key bytes from polynomial coefficients
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
@@ -233,18 +237,50 @@ int load_and_decrypt_batch(const char *filename,
         // Read metadata
         fread(&log.metadata, sizeof(LogMetadata), 1, fp);
         
-        // Read symmetric ciphertext
+        // Read symmetric ciphertext (CT_sym)
         fread(&log.ct_sym.ct_len, sizeof(uint32_t), 1, fp);
         log.ct_sym.ciphertext = (uint8_t*)malloc(log.ct_sym.ct_len);
         fread(log.ct_sym.ciphertext, log.ct_sym.ct_len, 1, fp);
         fread(log.ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
         fread(log.ct_sym.tag, AES_TAG_SIZE, 1, fp);
         
+        // Read ABE ciphertext (CT_ABE)
+        fread(log.ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
+        fread(&log.ct_abe.n_components, sizeof(uint32_t), 1, fp);
+        
+        // Allocate and read C0
+        size_t c0_size = PARAM_M * PARAM_N;
+        log.ct_abe.C0 = (poly_matrix)malloc(c0_size * sizeof(scalar));
+        fread(log.ct_abe.C0, sizeof(scalar), c0_size, fp);
+        
+        // Allocate and read C[i] components
+        log.ct_abe.C = (poly_matrix*)malloc(log.ct_abe.n_components * sizeof(poly_matrix));
+        for (uint32_t j = 0; j < log.ct_abe.n_components; j++) {
+            log.ct_abe.C[j] = (poly_matrix)malloc(c0_size * sizeof(scalar));
+            fread(log.ct_abe.C[j], sizeof(scalar), c0_size, fp);
+        }
+        
+        // Allocate and read ct_key
+        log.ct_abe.ct_key = (poly)malloc(PARAM_N * sizeof(scalar));
+        fread(log.ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
+        
+        // Read rho
+        uint32_t matrix_rows;
+        fread(&matrix_rows, sizeof(uint32_t), 1, fp);
+        if (matrix_rows > 0) {
+            log.ct_abe.policy.matrix_rows = matrix_rows;
+            log.ct_abe.policy.rho = (uint32_t*)malloc(matrix_rows * sizeof(uint32_t));
+            fread(log.ct_abe.policy.rho, sizeof(uint32_t), matrix_rows, fp);
+        }
+        
         // Read hash
         fread(log.hash, SHA3_DIGEST_SIZE, 1, fp);
         
-        // Decrypt (ABE part needs to be loaded separately or cached)
-        // This is simplified - in practice, batch would share ABE ciphertext
+        // Now decrypt the log using ABE + AES-GCM
+        printf("[Load]   Log %d: %s\n", i + 1, log.metadata.timestamp);
+        
+        // TODO: Call decryption function here
+        // decrypt_log_entry(&log, usk, mpk, ...);
         
         encrypted_log_free(&log);
     }

@@ -1,4 +1,5 @@
 #include "lcp_util.h"
+#include "../common/lcp_types.h"
 #include "../../module_gaussian_lattice/Module_BFRS/random.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -151,10 +152,68 @@ void sha3_256(const uint8_t *input, size_t input_len, uint8_t output[SHA3_DIGEST
     memcpy(output, state_bytes, SHA3_DIGEST_SIZE);
 }
 
-void sha3_256_log_object(const void *ct_obj, uint8_t output[SHA3_DIGEST_SIZE]) {
-    // Simple implementation: hash the memory block
-    // In production, you'd serialize fields properly
-    sha3_256((const uint8_t *)ct_obj, sizeof(void*), output);
+void sha3_256_log_object(const void *ct_obj_ptr, uint8_t output[SHA3_DIGEST_SIZE]) {
+    const EncryptedLogObject *ct_obj = (const EncryptedLogObject *)ct_obj_ptr;
+    
+    // Hash CT_obj = {CT_sym, CT_ABE, meta} according to Phase 3 spec
+    // We need to serialize the structure properly
+    
+    // Calculate total size needed for serialization
+    size_t total_size = 0;
+    
+    // CT_sym components
+    total_size += sizeof(ct_obj->ct_sym.ct_len);
+    total_size += ct_obj->ct_sym.ct_len;  // ciphertext
+    total_size += AES_NONCE_SIZE;
+    total_size += AES_TAG_SIZE;
+    
+    // CT_ABE components (simplified: hash the policy and component count)
+    total_size += sizeof(ct_obj->ct_abe.policy.expression);
+    total_size += sizeof(ct_obj->ct_abe.n_components);
+    
+    // Metadata
+    total_size += sizeof(LogMetadata);
+    
+    // Allocate buffer for serialization
+    uint8_t *buffer = (uint8_t *)malloc(total_size);
+    if (!buffer) {
+        fprintf(stderr, "[Hash] ERROR: Failed to allocate hash buffer\n");
+        memset(output, 0, SHA3_DIGEST_SIZE);
+        return;
+    }
+    
+    uint8_t *ptr = buffer;
+    
+    // Serialize CT_sym
+    memcpy(ptr, &ct_obj->ct_sym.ct_len, sizeof(ct_obj->ct_sym.ct_len));
+    ptr += sizeof(ct_obj->ct_sym.ct_len);
+    
+    if (ct_obj->ct_sym.ciphertext && ct_obj->ct_sym.ct_len > 0) {
+        memcpy(ptr, ct_obj->ct_sym.ciphertext, ct_obj->ct_sym.ct_len);
+        ptr += ct_obj->ct_sym.ct_len;
+    }
+    
+    memcpy(ptr, ct_obj->ct_sym.nonce, AES_NONCE_SIZE);
+    ptr += AES_NONCE_SIZE;
+    
+    memcpy(ptr, ct_obj->ct_sym.tag, AES_TAG_SIZE);
+    ptr += AES_TAG_SIZE;
+    
+    // Serialize CT_ABE (simplified: policy and component count)
+    memcpy(ptr, ct_obj->ct_abe.policy.expression, sizeof(ct_obj->ct_abe.policy.expression));
+    ptr += sizeof(ct_obj->ct_abe.policy.expression);
+    
+    memcpy(ptr, &ct_obj->ct_abe.n_components, sizeof(ct_obj->ct_abe.n_components));
+    ptr += sizeof(ct_obj->ct_abe.n_components);
+    
+    // Serialize metadata
+    memcpy(ptr, &ct_obj->metadata, sizeof(LogMetadata));
+    ptr += sizeof(LogMetadata);
+    
+    // Compute SHA3-256 hash
+    sha3_256(buffer, total_size, output);
+    
+    free(buffer);
 }
 
 // ============================================================================

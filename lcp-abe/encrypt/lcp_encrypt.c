@@ -770,20 +770,46 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
     // Write policy
     fwrite(batch->policy.expression, MAX_POLICY_SIZE, 1, fp);
     
-    // Write each encrypted log
+    // Write each encrypted log (CT_obj = {CT_sym, CT_ABE, meta})
     for (uint32_t i = 0; i < batch->n_logs; i++) {
         const EncryptedLogObject *log = &batch->logs[i];
         
         // Write metadata
         fwrite(&log->metadata, sizeof(LogMetadata), 1, fp);
         
-        // Write symmetric ciphertext
+        // Write symmetric ciphertext (CT_sym)
         fwrite(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp);
         fwrite(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
         fwrite(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
         fwrite(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
         
-        // Write hash
+        // Write ABE ciphertext (CT_ABE) - essential for decryption!
+        // Write policy expression and component count
+        fwrite(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
+        fwrite(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp);
+        
+        // Write C0 (m x n matrix in CRT domain)
+        size_t c0_size = PARAM_M * PARAM_N;
+        fwrite(log->ct_abe.C0, sizeof(scalar), c0_size, fp);
+        
+        // Write each C[i] component
+        for (uint32_t j = 0; j < log->ct_abe.n_components; j++) {
+            fwrite(log->ct_abe.C[j], sizeof(scalar), c0_size, fp);
+        }
+        
+        // Write ct_key (the encapsulated K_log)
+        fwrite(log->ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
+        
+        // Write rho (attribute mapping)
+        if (log->ct_abe.policy.rho && log->ct_abe.policy.matrix_rows > 0) {
+            fwrite(&log->ct_abe.policy.matrix_rows, sizeof(uint32_t), 1, fp);
+            fwrite(log->ct_abe.policy.rho, sizeof(uint32_t), log->ct_abe.policy.matrix_rows, fp);
+        } else {
+            uint32_t zero = 0;
+            fwrite(&zero, sizeof(uint32_t), 1, fp);
+        }
+        
+        // Write hash (h_i = SHA3-256(CT_obj))
         fwrite(log->hash, SHA3_DIGEST_SIZE, 1, fp);
     }
     
