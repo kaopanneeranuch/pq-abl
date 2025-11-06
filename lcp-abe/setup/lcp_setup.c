@@ -40,6 +40,12 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     printf("[Setup] Converting T to coefficient domain...\n");
     matrix_coeffs_representation(msk->T, 2 * PARAM_D, PARAM_D * PARAM_K, LOG_R);
     
+    // CRITICAL: Add q to T's coefficients to make them positive (required by construct_complex_private_key)
+    printf("[Setup] Adding q to T coefficients...\n");
+    for (int i = 0; i < PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K; i++) {
+        msk->T[i] += PARAM_Q;
+    }
+    
     // Construct complex representation for Gaussian sampling
     printf("[Setup] Computing complex representation of trapdoor...\n");
     construct_complex_private_key(msk->cplx_T, msk->sch_comp, msk->T);
