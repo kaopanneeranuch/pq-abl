@@ -390,28 +390,16 @@ int encrypt_microbatch(const JsonLogEntry *logs,
     
     // ========================================================================
     // OPTIMIZATION: Batch Attribute-Based Key Encapsulation (per paper)
-    // - Perform ONE ABE encryption per batch to get shared CT_ABE components
-    // - Reuse the C0 and C[i] ciphertext structure across all logs
-    // - Each log gets its own K_log for content-level isolation
+    // - Logs with same policy in same epoch are batched together
+    // - Each log gets unique K_log for content-level isolation
+    // - TODO: Reuse C0 and C[i] components across batch for true O(1/N) optimization
     // ========================================================================
-    printf("[Microbatch]   Step 1: Performing ONE ABE encryption for batch (shared structure)\n");
-    
-    // Create a dummy key just to generate the ABE ciphertext structure
-    // The actual K_log values will be different for each log
-    uint8_t dummy_key[AES_KEY_SIZE] = {0};
-    ABECiphertext shared_ct_abe;
-    
-    if (lcp_abe_encrypt(dummy_key, &batch->policy, mpk, &shared_ct_abe) != 0) {
-        fprintf(stderr, "Error: Failed to create shared ABE structure\n");
-        return -1;
-    }
-    
-    printf("[Microbatch]   Step 2: Encrypting %d logs with unique K_log (reusing ABE structure)\n", n_logs);
+    printf("[Microbatch]   Step 2: Encrypting %d logs with unique K_log (batched by policy+epoch)\n", n_logs);
     
     // Encrypt each log in the batch
     for (uint32_t i = 0; i < n_logs; i++) {
         if (i < 3 || i == n_logs - 1) {
-            printf("[Microbatch]     Log %d/%d: Generating unique K_log and symmetric encryption\n", 
+            printf("[Microbatch]     Log %d/%d: Generating unique K_log and encrypting\n", 
                    i + 1, n_logs);
         }
         
@@ -445,9 +433,7 @@ int encrypt_microbatch(const JsonLogEntry *logs,
             return -1;
         }
         
-        // Step 3: Encapsulate THIS log's K_log using the shared ABE structure
-        // This creates CT_ABE^(n) by encoding k_log into ct_key component
-        // while reusing the C0 and C[i] components from shared structure
+        // Step 3: Encapsulate K_log with LCP-ABE under batch policy
         if (lcp_abe_encrypt(k_log, &batch->policy, mpk, &encrypted_log->ct_abe) != 0) {
             fprintf(stderr, "Error: ABE encryption failed for log %d\n", i);
             return -1;
@@ -457,19 +443,9 @@ int encrypt_microbatch(const JsonLogEntry *logs,
         sha3_256_log_object(encrypted_log, encrypted_log->hash);
     }
     
-    // Clean up shared structure
-    // (Note: in real optimization, we'd actually reuse C0/C components instead of re-encrypting)
-    if (shared_ct_abe.C0) free(shared_ct_abe.C0);
-    if (shared_ct_abe.C) {
-        for (uint32_t i = 0; i < shared_ct_abe.n_components; i++) {
-            if (shared_ct_abe.C[i]) free(shared_ct_abe.C[i]);
-        }
-        free(shared_ct_abe.C);
-    }
-    if (shared_ct_abe.ct_key) free(shared_ct_abe.ct_key);
-    
-    printf("[Microbatch]   ✓ Batch complete: %d logs encrypted (amortized ABE cost: O(1/%d))\n", 
-           n_logs, n_logs);
+    printf("[Microbatch]   ✓ Batch complete: %d logs encrypted with shared policy '%s'\n", 
+           n_logs, batch->policy.expression);
+    printf("[Microbatch]   (Batching reduces per-log overhead via policy+epoch grouping)\n");
     return 0;
 }
 
