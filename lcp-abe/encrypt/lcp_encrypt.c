@@ -125,7 +125,8 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     printf("[Encrypt]   DEBUG: s allocated at %p\n", (void*)s);
     
     for (uint32_t i = 0; i < PARAM_D; i++) {
-        poly s_i = poly_matrix_element(s, PARAM_D, i, 0);
+        // s is a column vector (PARAM_D rows x 1 col), so nb_col = 1
+        poly s_i = poly_matrix_element(s, 1, i, 0);
         random_poly(s_i, PARAM_N - 1);
     }
     printf("[Encrypt]   DEBUG: s sampling completed\n");
