@@ -59,22 +59,49 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     poly_matrix target = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     poly_matrix sum_term = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     
+    printf("[KeyGen]   Memory allocated: target=%p, sum_term=%p\n", (void*)target, (void*)sum_term);
+    
     // Step 1: Compute sum_term = Σ(B+_i · ωi)
     printf("[KeyGen]   Computing Σ(B+_i · ωi)...\n");
+    printf("[KeyGen]   MPK has %d attributes, PARAM_M=%d, PARAM_N=%d\n", 
+           mpk->n_attributes, PARAM_M, PARAM_N);
+    
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
         
         printf("[KeyGen]     Processing attribute %d/%d (index %d): %s\n", 
                i+1, attr_set->count, attr->index, attr->name);
         
+        // Validate attribute index
+        if (attr->index >= mpk->n_attributes) {
+            fprintf(stderr, "[KeyGen] ERROR: Invalid attribute index %d (max %d)\n", 
+                    attr->index, mpk->n_attributes - 1);
+            free(target);
+            free(sum_term);
+            return -1;
+        }
+        
         // Get B+_i: this is the attr->index-th row of B_plus matrix
-        // B_plus is stored as n_attributes rows × m columns
-        // Each row is m polynomials (m × PARAM_N scalars)
-        poly_matrix B_plus_i = poly_matrix_element(mpk->B_plus, PARAM_M, attr->index, 0);
+        // B_plus is stored as: n_attributes rows, each row has PARAM_M polynomials
+        // Total size: n_attributes × PARAM_M × PARAM_N scalars
+        // To get row i: skip (i × PARAM_M × PARAM_N) scalars
+        printf("[KeyGen]       Accessing B_plus[%d] = offset %d scalars\n", 
+               attr->index, attr->index * PARAM_M * PARAM_N);
+        
+        poly_matrix B_plus_i = &mpk->B_plus[attr->index * PARAM_M * PARAM_N];
+        printf("[KeyGen]       B_plus_i address: %p\n", (void*)B_plus_i);
         
         // Compute dot product: B+_i · ωi where both are m-dimensional vectors
         // Result is a single polynomial in R_q
         poly temp_result = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!temp_result) {
+            fprintf(stderr, "[KeyGen] ERROR: Failed to allocate temp_result\n");
+            free(target);
+            free(sum_term);
+            return -1;
+        }
+        
+        printf("[KeyGen]       Computing dot product over %d polynomials\n", PARAM_M);
         
         for (uint32_t j = 0; j < PARAM_M; j++) {
             // B_plus_i[j] is the j-th polynomial in the row
@@ -83,8 +110,21 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             // omega_i[i][j] is the j-th polynomial in the omega_i vector
             poly omega_ij = &usk->omega_i[i][j * PARAM_N];
             
+            if (j == 0 || j == PARAM_M - 1) {
+                printf("[KeyGen]         [j=%d] B_ij=%p, omega_ij=%p\n", 
+                       j, (void*)B_ij, (void*)omega_ij);
+            }
+            
             // Multiply polynomials in CRT domain
             double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+            if (!temp_prod) {
+                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate temp_prod at j=%d\n", j);
+                free(temp_result);
+                free(target);
+                free(sum_term);
+                return -1;
+            }
+            
             mul_crt_poly(temp_prod, B_ij, omega_ij, LOG_R);
             
             // Reduce and add to accumulator
@@ -94,12 +134,14 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             free(temp_prod);
         }
         
+        printf("[KeyGen]       Dot product complete, adding to sum_term\n");
+        
         // Add to sum_term (put in first component of k-vector)
         poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
         add_poly(sum_0, sum_0, temp_result, PARAM_N - 1);
         free(temp_result);
         
-        printf("[KeyGen]     Attribute %d processed\n", i+1);
+        printf("[KeyGen]     Attribute %d processed successfully\n", i+1);
     }
     
     // Copy β to target's first component

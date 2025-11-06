@@ -110,8 +110,12 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
                i, attr_idx, i, shares[i]);
         
         // Get B+_{ρ(i)}: this is the attr_idx-th row of B_plus matrix
-        // B_plus is stored as n_attributes rows × m columns
-        poly_matrix B_plus_attr = poly_matrix_element(mpk->B_plus, PARAM_M, attr_idx, 0);
+        // B_plus is stored as: n_attributes rows, each row is PARAM_M * PARAM_N scalars
+        // Offset for attribute attr_idx: attr_idx * PARAM_M * PARAM_N
+        poly_matrix B_plus_attr = &mpk->B_plus[attr_idx * PARAM_M * PARAM_N];
+        
+        printf("[Encrypt]     B_plus_attr offset: %lu scalars\n", 
+               (unsigned long)(attr_idx * PARAM_M * PARAM_N));
         
         // Sample error e_i ∈ R_q^m
         poly_matrix e_i = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));

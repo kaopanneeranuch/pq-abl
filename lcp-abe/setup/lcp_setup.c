@@ -122,15 +122,25 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     random_poly(mpk->beta, PARAM_N - 1);
     printf("[Setup]   Challenge β generated\n");
     printf("[Setup] Generating %d cacheable attribute sub-matrices...\n", n_attributes);
+    printf("[Setup]   B_plus layout: %d attributes × %d polynomials = %d total polys\n",
+           n_attributes, PARAM_M, n_attributes * PARAM_M);
     
     for (uint32_t i = 0; i < n_attributes; i++) {
         // B+_i: row vector of m polynomials in Rq
-        poly_matrix B_plus_i = poly_matrix_element(mpk->B_plus, n_attributes, i, 0);
+        // Each attribute i occupies PARAM_M * PARAM_N scalars
+        // Offset for attribute i: i * PARAM_M * PARAM_N
+        poly_matrix B_plus_i = &mpk->B_plus[i * PARAM_M * PARAM_N];
         random_poly(B_plus_i, PARAM_M * PARAM_N - 1);
         
         // B-_i: row vector of m polynomials in Rq
-        poly_matrix B_minus_i = poly_matrix_element(mpk->B_minus, n_attributes, i, 0);
+        poly_matrix B_minus_i = &mpk->B_minus[i * PARAM_M * PARAM_N];
         random_poly(B_minus_i, PARAM_M * PARAM_N - 1);
+        
+        if (i == 0 || i == n_attributes - 1) {
+            printf("[Setup]     Attribute %d: B_plus offset=%lu, B_minus offset=%lu\n",
+                   i, (unsigned long)(i * PARAM_M * PARAM_N), 
+                   (unsigned long)(i * PARAM_M * PARAM_N));
+        }
     }
     
     printf("[Setup]   Generated %d attribute vector pairs (B+_i, B-_i)\n", n_attributes);
