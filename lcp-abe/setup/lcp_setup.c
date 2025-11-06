@@ -37,8 +37,7 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
         init_D_lattice_coeffs();
         initialized = 1;
     }
-    
-    printf("[Setup] Optimized Module-LWE LCP-ABE System Setup\n");
+
     printf("[Setup] ==========================================\n");
     printf("[Setup] Security parameter λ: %d-bit\n", PARAM_K);
     printf("[Setup] Module rank k: %d\n", PARAM_D);
@@ -58,10 +57,6 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     // Execute MTRAPGEN(λ) to generate random module matrix A ∈ R^{k×m}_q
     // with its trapdoor TA. The module rank k < m provides balanced trade-off
     // between key size and sampling efficiency.
-    
-    printf("[Setup]\n");
-    printf("[Setup] Algorithm 1, Line 1: (A, TA) ← MTRAPGEN(λ, k, m)\n");
-    printf("[Setup] Generating trapdoor matrix with Module-LWE parameters...\n");
     
     // Sample trapdoor T from Gaussian distribution D_{R^{2k,km},σ}
     // This gives us short trapdoor basis in coefficient domain
@@ -119,29 +114,13 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     free(A_hat_coeffs);
     free(AprimeT_coeffs);
     
-    printf("[Setup]   ✓ Matrix A and trapdoor TA generated\n");
     
-    // ========================================================================
-    // Algorithm 1, Line 2: β ← Uniform(Rq)
-    // ========================================================================
-    // Select random challenge element β ∈ Rq uniformly at random
     
     printf("[Setup]\n");
     printf("[Setup] Algorithm 1, Line 2: β ← Uniform(Rq)\n");
     printf("[Setup] Selecting random challenge element...\n");
     random_poly(mpk->beta, PARAM_N - 1);
-    printf("[Setup]   ✓ Challenge β generated\n");
-    
-    // ========================================================================
-    // Algorithm 1, Lines 3-5: Generate cacheable attribute sub-matrices
-    // ========================================================================
-    // For each attribute xi ∈ X, public vectors (B+_i, B-_i) ∈ R^{1×m}_q
-    // are generated and cached for reuse across setup epochs.
-    
-    printf("[Setup]\n");
-    printf("[Setup] Algorithm 1, Lines 3-5: Generating attribute vectors\n");
-    printf("[Setup] for i = 1 to ℓ do\n");
-    printf("[Setup]   (B+_i, B-_i) ← Uniform(R^{1×m}_q)\n");
+    printf("[Setup]   Challenge β generated\n");
     printf("[Setup] Generating %d cacheable attribute sub-matrices...\n", n_attributes);
     
     for (uint32_t i = 0; i < n_attributes; i++) {
@@ -154,20 +133,12 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
         random_poly(B_minus_i, PARAM_M * PARAM_N - 1);
     }
     
-    printf("[Setup]   ✓ Generated %d attribute vector pairs (B+_i, B-_i)\n", n_attributes);
+    printf("[Setup]   Generated %d attribute vector pairs (B+_i, B-_i)\n", n_attributes);
     
     // ========================================================================
     // Algorithm 1, Lines 6-7: Output MPK and MSK
     // ========================================================================
     
-    printf("[Setup]\n");
-    printf("[Setup] Algorithm 1, Lines 6-7: Output keys\n");
-    printf("[Setup] MPK ← {A, {(B+_i, B-_i)}_{i∈[ℓ]}, β}\n");
-    printf("[Setup] MSK ← TA\n");
-    printf("[Setup]\n");
-    printf("[Setup] ==========================================\n");
-    printf("[Setup] ✓ Optimized Module-LWE Setup Complete\n");
-    printf("[Setup] ==========================================\n");
     printf("[Setup] Master Public Key (MPK):\n");
     printf("[Setup]   - Matrix A: k×m = %d×%d (module matrix)\n", PARAM_D, PARAM_M);
     printf("[Setup]   - Attribute vectors: %d pairs (B+_i, B-_i)\n", n_attributes);
@@ -175,11 +146,6 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     printf("[Setup] Master Secret Key (MSK):\n");
     printf("[Setup]   - Trapdoor TA: 2k×km = %d×%d\n", 2*PARAM_D, PARAM_D*PARAM_K);
     printf("[Setup]   - Schur complements for Gaussian sampling\n");
-    printf("[Setup]\n");
-    printf("[Setup] Optimization: Module-LWE construction reduces key size\n");
-    printf("[Setup] and trapdoor sampling complexity compared to Ring-LWE,\n");
-    printf("[Setup] yielding faster initialization and lower storage cost\n");
-    printf("[Setup] for large attribute universes.\n");
     
     return 0;
 }

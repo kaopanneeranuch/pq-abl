@@ -69,12 +69,22 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         add_poly(c0_i, c0_i, e0_i, PARAM_N);
     }
     
+    // TODO: Update encryption to use new MPK structure (B+, B-, β)
+    // For now, return error as encryption needs redesign for Algorithm 2
+    fprintf(stderr, "[Encrypt] ERROR: Encryption not yet updated for Algorithm 2\n");
+    fprintf(stderr, "[Encrypt] Please implement encryption using B+ and β\n");
+    
+    free(s);
+    free(e_0);
+    return -1;
+    
+    /* OLD CODE - needs update for new scheme
     // Step 5: For each row i of LSSS matrix
     for (uint32_t i = 0; i < n_rows; i++) {
         uint32_t attr_idx = policy->rho[i]; // Attribute for row i
         
-        // Get u_{ρ(i)} from MPK
-        poly_matrix u_attr = poly_matrix_element(mpk->U, mpk->n_attributes, 0, attr_idx);
+        // Get u_{ρ(i)} from MPK - THIS DOESN'T EXIST ANYMORE
+        // poly_matrix u_attr = poly_matrix_element(mpk->U, mpk->n_attributes, 0, attr_idx);
         
         // Sample error e_i
         poly_matrix e_i = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
@@ -83,7 +93,7 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         // C_i = u_{ρ(i)}^T · s + e_i + λ_i · g
         // where g is gadget vector [1, 2, 4, ..., 2^(k-1)]
         
-        // Compute u^T · s (simplified: dot product)
+    */"        // Compute u^T · s (simplified: dot product)
         poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         for (uint32_t j = 0; j < PARAM_D; j++) {
             poly u_j = poly_matrix_element(u_attr, 1, j, 0);

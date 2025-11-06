@@ -29,23 +29,12 @@
 int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
                const AttributeSet *attr_set, UserSecretKey *usk) {
     
-    printf("[KeyGen] ==========================================\n");
-    printf("[KeyGen] Optimized Module-LWE Key Generation (Algorithm 2)\n");
-    printf("[KeyGen] ==========================================\n");
     printf("[KeyGen] User attribute set Y: %d attributes\n", attr_set->count);
     
     // Initialize user secret key structure
     usk_init(usk, attr_set->count);
     usk->attr_set = *attr_set;
-    
-    // ========================================================================
-    // Algorithm 2, Lines 1-3: Sample ωi ← D^m_σs for all xi ∈ Y (parallel)
-    // ========================================================================
-    printf("[KeyGen]\n");
-    printf("[KeyGen] Lines 1-3: Batched Gaussian sampling\n");
-    printf("[KeyGen] for all xi ∈ Y in parallel do\n");
-    printf("[KeyGen]   ωi ← D^m_σs\n");
-    printf("[KeyGen] end for\n");
+
     printf("[KeyGen] Sampling %d secret vectors ωi (m=%d dimensions each)...\n", 
            attr_set->count, PARAM_M);
     
@@ -63,26 +52,8 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         matrix_crt_representation(usk->omega_i[i], PARAM_M, 1, LOG_R);
     }
     
-    printf("[KeyGen]   ✓ Sampled %d vectors {ωi}\n", attr_set->count);
-    
-    // ========================================================================
-    // Algorithm 2, Line 4: Sample ωA ← D^m_σs (auxiliary vector)
-    // ========================================================================
-    // We'll sample this in Line 5 using the trapdoor to satisfy the constraint
-    
-    // ========================================================================
-    // Algorithm 2, Line 5: Compute approximate preimage
-    // ========================================================================
-    // A·ωA + Σ(B+_i · ωi) ≈ β (mod q)
-    //
-    // Strategy:
-    // 1. Compute sum_term = Σ(B+_i · ωi) 
-    // 2. Compute target = β - sum_term
-    // 3. Use trapdoor TA to sample ωA such that A·ωA ≈ target
-    
+    printf("[KeyGen] Sampled %d vectors {ωi}\n", attr_set->count);
     printf("[KeyGen]\n");
-    printf("[KeyGen] Line 5: Compute approximate preimage\n");
-    printf("[KeyGen] A·ωA + Σ(B+_i · ωi) ≈ β (mod q)\n");
     
     // Allocate target vector (k-dimensional, k=PARAM_D)
     poly_matrix target = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
@@ -123,11 +94,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         free(temp_result);
     }
     
-    printf("[KeyGen]   ✓ Computed Σ(B+_i · ωi)\n");
-    
-    // Step 2: Compute target = β - sum_term
-    printf("[KeyGen]   Computing target = β - Σ(B+_i · ωi)...\n");
-    
     // Copy β to target's first component
     poly target_0 = poly_matrix_element(target, PARAM_D, 0, 0);
     memcpy(target_0, mpk->beta, PARAM_N * sizeof(scalar));
@@ -136,11 +102,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
     sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
     
-    printf("[KeyGen]   ✓ Target computed\n");
-    
-    // Step 3: Sample ωA using trapdoor such that A·ωA ≈ target
-    printf("[KeyGen]   Sampling ωA using trapdoor TA (Gaussian preimage sampling)...\n");
-    printf("[KeyGen]   This uses the Module-LWE trapdoor to solve A·ωA ≈ target\n");
+    printf("[KeyGen]   Target computed\n");
     
     // Convert target to CRT domain for sampling
     matrix_crt_representation(target, PARAM_D, 1, LOG_R);
@@ -153,7 +115,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     
     sample_pre_target(usk->omega_A, mpk->A, msk->T, msk->cplx_T, msk->sch_comp, h_inv, target);
     
-    printf("[KeyGen]   ✓ ωA sampled successfully\n");
     
     free(h_inv);
     free(target);
@@ -163,11 +124,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     // Algorithm 2, Line 6: Return SKY = (ωA, {ωi}_{xi∈Y})
     // ========================================================================
     printf("[KeyGen]\n");
-    printf("[KeyGen] Line 6: return SKY = (ωA, {ωi}_{xi∈Y})\n");
-    printf("[KeyGen]\n");
-    printf("[KeyGen] ==========================================\n");
-    printf("[KeyGen] ✓ Key Generation Complete\n");
-    printf("[KeyGen] ==========================================\n");
     printf("[KeyGen] User secret key SKY:\n");
     printf("[KeyGen]   - Auxiliary vector ωA: m=%d dimensional\n", PARAM_M);
     printf("[KeyGen]   - Attribute vectors: %d vectors {ωi}\n", attr_set->count);
