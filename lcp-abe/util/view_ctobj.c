@@ -24,11 +24,15 @@ int view_ctobj(const char *filename) {
     }
     
     printf("--- Metadata ---\n");
-    printf("Log ID: %lu\n", meta.log_id);
-    printf("Timestamp: %lu\n", meta.timestamp);
-    printf("Epoch ID: %lu\n", meta.epoch_id);
-    printf("Batch Index: %u\n", meta.batch_index);
-    printf("Log Index: %u\n", meta.log_index);
+    printf("Timestamp: %s\n", meta.timestamp);
+    printf("User ID: %s\n", meta.user_id);
+    printf("User Role: %s\n", meta.user_role);
+    printf("Team: %s\n", meta.team);
+    printf("Action Type: %s\n", meta.action_type);
+    printf("Resource ID: %s\n", meta.resource_id);
+    printf("Resource Type: %s\n", meta.resource_type);
+    printf("Service Name: %s\n", meta.service_name);
+    printf("Region: %s\n", meta.region);
     printf("\n");
     
     // Read CT_sym
