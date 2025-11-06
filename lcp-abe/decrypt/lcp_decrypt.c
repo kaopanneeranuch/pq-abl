@@ -206,85 +206,192 @@ int decrypt_microbatch(const Microbatch *batch,
     return 0;
 }
 
-int load_and_decrypt_batch(const char *filename,
-                          const UserSecretKey *usk,
-                          const MasterPublicKey *mpk) {
+// ============================================================================
+// Load individual CT_obj file
+// ============================================================================
+
+int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
         fprintf(stderr, "Error: Cannot open file %s\n", filename);
         return -1;
     }
     
-    // Read batch header
-    uint64_t epoch_id;
-    uint32_t n_logs;
-    char epoch_start[32], epoch_end[32];
-    char policy_expr[MAX_POLICY_SIZE];
+    encrypted_log_init(log);
     
-    fread(&epoch_id, sizeof(uint64_t), 1, fp);
-    fread(&n_logs, sizeof(uint32_t), 1, fp);
-    fread(epoch_start, 32, 1, fp);
-    fread(epoch_end, 32, 1, fp);
-    fread(policy_expr, MAX_POLICY_SIZE, 1, fp);
+    // Read metadata
+    if (fread(&log->metadata, sizeof(LogMetadata), 1, fp) != 1) {
+        fclose(fp);
+        return -1;
+    }
     
-    printf("[Load] Batch: epoch %lu, %d logs, policy: %s\n", epoch_id, n_logs, policy_expr);
+    // Read symmetric ciphertext (CT_sym)
+    if (fread(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp) != 1) {
+        fclose(fp);
+        return -1;
+    }
     
-    // Read and decrypt each log
-    for (uint32_t i = 0; i < n_logs; i++) {
-        EncryptedLogObject log;
-        encrypted_log_init(&log);
-        
-        // Read metadata
-        fread(&log.metadata, sizeof(LogMetadata), 1, fp);
-        
-        // Read symmetric ciphertext (CT_sym)
-        fread(&log.ct_sym.ct_len, sizeof(uint32_t), 1, fp);
-        log.ct_sym.ciphertext = (uint8_t*)malloc(log.ct_sym.ct_len);
-        fread(log.ct_sym.ciphertext, log.ct_sym.ct_len, 1, fp);
-        fread(log.ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
-        fread(log.ct_sym.tag, AES_TAG_SIZE, 1, fp);
-        
-        // Read ABE ciphertext (CT_ABE)
-        fread(log.ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
-        fread(&log.ct_abe.n_components, sizeof(uint32_t), 1, fp);
-        
-        // Allocate and read C0
-        size_t c0_size = PARAM_M * PARAM_N;
-        log.ct_abe.C0 = (poly_matrix)malloc(c0_size * sizeof(scalar));
-        fread(log.ct_abe.C0, sizeof(scalar), c0_size, fp);
-        
-        // Allocate and read C[i] components
-        log.ct_abe.C = (poly_matrix*)malloc(log.ct_abe.n_components * sizeof(poly_matrix));
-        for (uint32_t j = 0; j < log.ct_abe.n_components; j++) {
-            log.ct_abe.C[j] = (poly_matrix)malloc(c0_size * sizeof(scalar));
-            fread(log.ct_abe.C[j], sizeof(scalar), c0_size, fp);
-        }
-        
-        // Allocate and read ct_key
-        log.ct_abe.ct_key = (poly)malloc(PARAM_N * sizeof(scalar));
-        fread(log.ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
-        
-        // Read rho
-        uint32_t matrix_rows;
-        fread(&matrix_rows, sizeof(uint32_t), 1, fp);
-        if (matrix_rows > 0) {
-            log.ct_abe.policy.matrix_rows = matrix_rows;
-            log.ct_abe.policy.rho = (uint32_t*)malloc(matrix_rows * sizeof(uint32_t));
-            fread(log.ct_abe.policy.rho, sizeof(uint32_t), matrix_rows, fp);
-        }
-        
-        // Read hash
-        fread(log.hash, SHA3_DIGEST_SIZE, 1, fp);
-        
-        // Now decrypt the log using ABE + AES-GCM
-        printf("[Load]   Log %d: %s\n", i + 1, log.metadata.timestamp);
-        
-        // TODO: Call decryption function here
-        // decrypt_log_entry(&log, usk, mpk, ...);
-        
-        encrypted_log_free(&log);
+    log->ct_sym.ciphertext = (uint8_t*)malloc(log->ct_sym.ct_len);
+    fread(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
+    fread(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
+    fread(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
+    
+    // Read ABE ciphertext (CT_ABE)
+    fread(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
+    fread(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp);
+    
+    // Allocate and read C0
+    size_t c0_size = PARAM_M * PARAM_N;
+    log->ct_abe.C0 = (poly_matrix)malloc(c0_size * sizeof(scalar));
+    fread(log->ct_abe.C0, sizeof(scalar), c0_size, fp);
+    
+    // Allocate and read C[i] components
+    log->ct_abe.C = (poly_matrix*)malloc(log->ct_abe.n_components * sizeof(poly_matrix));
+    for (uint32_t j = 0; j < log->ct_abe.n_components; j++) {
+        log->ct_abe.C[j] = (poly_matrix)malloc(c0_size * sizeof(scalar));
+        fread(log->ct_abe.C[j], sizeof(scalar), c0_size, fp);
+    }
+    
+    // Allocate and read ct_key
+    log->ct_abe.ct_key = (poly)malloc(PARAM_N * sizeof(scalar));
+    fread(log->ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
+    
+    // Read rho
+    uint32_t matrix_rows;
+    fread(&matrix_rows, sizeof(uint32_t), 1, fp);
+    if (matrix_rows > 0) {
+        log->ct_abe.policy.matrix_rows = matrix_rows;
+        log->ct_abe.policy.rho = (uint32_t*)malloc(matrix_rows * sizeof(uint32_t));
+        fread(log->ct_abe.policy.rho, sizeof(uint32_t), matrix_rows, fp);
     }
     
     fclose(fp);
+    return 0;
+}
+
+// ============================================================================
+// Batch Decryption with Policy Reuse Optimization
+// ============================================================================
+
+typedef struct {
+    char policy[MAX_POLICY_SIZE];
+    uint8_t k_log[AES_KEY_SIZE];
+    int valid;
+} PolicyKeyCache;
+
+int decrypt_ctobj_batch(const char **filenames,
+                       uint32_t n_files,
+                       const UserSecretKey *usk,
+                       const MasterPublicKey *mpk,
+                       const char *output_dir) {
+    printf("\n=== Batch Decryption with Policy Reuse ===\n");
+    printf("[Decrypt] Processing %d CT_obj files\n", n_files);
+    
+    // Cache for policy-key pairs (optimization from Phase 6 spec)
+    PolicyKeyCache cache[100];  // Support up to 100 unique policies
+    uint32_t n_cached = 0;
+    
+    uint32_t success_count = 0;
+    uint32_t cache_hits = 0;
+    uint32_t abe_decryptions = 0;
+    
+    for (uint32_t i = 0; i < n_files; i++) {
+        printf("\n[Decrypt] File %d/%d: %s\n", i + 1, n_files, filenames[i]);
+        
+        // Load CT_obj
+        EncryptedLogObject log;
+        if (load_ctobj_file(filenames[i], &log) != 0) {
+            fprintf(stderr, "[Decrypt] Failed to load file\n");
+            continue;
+        }
+        
+        printf("[Decrypt]   Policy: %s\n", log.ct_abe.policy.expression);
+        printf("[Decrypt]   User: %s, Timestamp: %s\n", 
+               log.metadata.user_id, log.metadata.timestamp);
+        
+        // Check cache for this policy
+        uint8_t k_log[AES_KEY_SIZE];
+        int found_in_cache = 0;
+        
+        for (uint32_t c = 0; c < n_cached; c++) {
+            if (strcmp(cache[c].policy, log.ct_abe.policy.expression) == 0 && cache[c].valid) {
+                // Cache hit! Reuse the decrypted key
+                memcpy(k_log, cache[c].k_log, AES_KEY_SIZE);
+                found_in_cache = 1;
+                cache_hits++;
+                printf("[Decrypt]   ✓ Cache HIT! Reusing K_log from policy cache\n");
+                break;
+            }
+        }
+        
+        if (!found_in_cache) {
+            // Cache miss - perform LCP-ABE decryption
+            printf("[Decrypt]   ✗ Cache MISS - Performing LCP-ABE decryption...\n");
+            
+            if (lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log) != 0) {
+                fprintf(stderr, "[Decrypt]   Failed: Policy not satisfied or decryption error\n");
+                encrypted_log_free(&log);
+                continue;
+            }
+            
+            abe_decryptions++;
+            
+            // Add to cache
+            if (n_cached < 100) {
+                strncpy(cache[n_cached].policy, log.ct_abe.policy.expression, MAX_POLICY_SIZE);
+                memcpy(cache[n_cached].k_log, k_log, AES_KEY_SIZE);
+                cache[n_cached].valid = 1;
+                n_cached++;
+                printf("[Decrypt]   ✓ Added policy to cache (total cached: %d)\n", n_cached);
+            }
+        }
+        
+        // Decrypt symmetric ciphertext using K_log
+        uint8_t *log_data = NULL;
+        size_t log_len = 0;
+        
+        if (decrypt_log_symmetric(&log.ct_sym, k_log, &log.metadata, 
+                                 &log_data, &log_len) != 0) {
+            fprintf(stderr, "[Decrypt]   Failed: AES-GCM decryption or authentication failed\n");
+            encrypted_log_free(&log);
+            continue;
+        }
+        
+        printf("[Decrypt]   ✓ Decrypted successfully (%zu bytes)\n", log_len);
+        printf("[Decrypt]   Log content: %.*s\n", (int)(log_len < 200 ? log_len : 200), log_data);
+        
+        // Save decrypted log
+        if (output_dir) {
+            char output_filename[512];
+            snprintf(output_filename, sizeof(output_filename), 
+                    "%s/decrypted_log_%d.json", output_dir, i + 1);
+            
+            FILE *out_fp = fopen(output_filename, "w");
+            if (out_fp) {
+                fwrite(log_data, 1, log_len, out_fp);
+                fclose(out_fp);
+                printf("[Decrypt]   Saved to: %s\n", output_filename);
+            }
+        }
+        
+        free(log_data);
+        encrypted_log_free(&log);
+        success_count++;
+    }
+    
+    // Print statistics
+    printf("\n=== Decryption Statistics ===\n");
+    printf("Total files: %d\n", n_files);
+    printf("Successfully decrypted: %d\n", success_count);
+    printf("Failed: %d\n", n_files - success_count);
+    printf("\n--- Policy Reuse Optimization ---\n");
+    printf("LCP-ABE decryptions performed: %d\n", abe_decryptions);
+    printf("Cache hits (reused keys): %d\n", cache_hits);
+    printf("Unique policies encountered: %d\n", n_cached);
+    if (n_files > 0) {
+        printf("Efficiency: %.1f%% reduction in ABE operations\n", 
+               100.0 * cache_hits / n_files);
+    }
+    
     return 0;
 }

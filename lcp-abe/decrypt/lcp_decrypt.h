@@ -26,6 +26,18 @@ int decrypt_log_entry(const EncryptedLogObject *encrypted_log,
                      uint8_t **log_data_out,
                      size_t *log_len);
 
+// Load individual CT_obj file
+int load_ctobj_file(const char *filename, EncryptedLogObject *log);
+
+// Batch decryption with policy reuse optimization (Phase 6 spec)
+// Processes multiple CT_obj files and reuses ABE decryption for same policies
+int decrypt_ctobj_batch(const char **filenames,
+                       uint32_t n_files,
+                       const UserSecretKey *usk,
+                       const MasterPublicKey *mpk,
+                       const char *output_dir);
+
+// Legacy functions (for old batch file format)
 // Decrypt microbatch
 int decrypt_microbatch(const Microbatch *batch,
                       const UserSecretKey *usk,
