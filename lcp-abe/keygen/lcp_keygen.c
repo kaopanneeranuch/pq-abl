@@ -65,7 +65,11 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         
         printf("[KeyGen]     Step 1: Hashing attribute to polynomial...\n");
         // Step 1: Hash attribute to polynomial f_i = H(attr_i)
-        hash_attribute_to_poly(attr->name, f_i);
+        // TEMPORARY DEBUG: Use a simple fixed polynomial instead of hash
+        memset(f_i, 0, PARAM_N * sizeof(scalar));
+        f_i[0] = 1;  // Just use f_i = 1 (constant polynomial)
+        printf("[KeyGen]       DEBUG: Using f_i = 1 (constant) for testing\n");
+        //hash_attribute_to_poly(attr->name, f_i);
         
         printf("[KeyGen]     Step 2: Getting u_i from MPK as target...\n");
         // Step 2: Verify attribute index is valid

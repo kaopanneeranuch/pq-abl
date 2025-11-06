@@ -524,20 +524,27 @@ void sample_pre(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix 
 
 void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix cplx_T, cplx_poly_matrix sch_comp, poly h_inv, poly_matrix u)
 	{
+	printf("[DEBUG] sample_pre_target: START\n"); fflush(stdout);
+	
 	// Sample a perturbation p in R^m
 	signed_scalar p_coeffs[PARAM_N * PARAM_M];
 	signed_poly_matrix p = p_coeffs;
 	
+	printf("[DEBUG] sample_pre_target: Calling sample_perturb...\n"); fflush(stdout);
 	sample_perturb(p, cplx_T, sch_comp);
+	printf("[DEBUG] sample_pre_target: sample_perturb done\n"); fflush(stdout);
 	
 	
 	// Add q to p's coeffs so that they are positive, and put p in the CRT domain
+	printf("[DEBUG] sample_pre_target: Adding q to p coeffs...\n"); fflush(stdout);
 	for(int i = 0 ; i < PARAM_N * PARAM_M ; ++i)
 		{
 		p[i] += PARAM_Q;
 		}
 	
+	printf("[DEBUG] sample_pre_target: Converting p to CRT...\n"); fflush(stdout);
 	matrix_crt_representation((poly_matrix) p, PARAM_M, 1, LOG_R);
+	printf("[DEBUG] sample_pre_target: p in CRT domain\n"); fflush(stdout);
 	
 	// v <- - h_inv * A_m * p (in the CRT domain)
 	double_scalar prod_coeffs[2*PARAM_N];
