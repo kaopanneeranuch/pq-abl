@@ -11,12 +11,18 @@
 // ============================================================================
 
 // Hash attribute name to polynomial using SHA3-256
+// NOTE: For compatibility with Module_BFRS construct_A_m, we only generate
+// SMALL_DEGREE = PARAM_N/PARAM_R coefficients (the polynomial is "small degree")
 void hash_attribute_to_poly(const char *attr_name, poly output) {
     uint8_t hash[SHA3_DIGEST_SIZE];
     sha3_256((const uint8_t *)attr_name, strlen(attr_name), hash);
     
-    // Convert hash to polynomial coefficients
-    for (uint32_t i = 0; i < PARAM_N && i * 4 < SHA3_DIGEST_SIZE; i++) {
+    // Zero out the entire polynomial first
+    memset(output, 0, PARAM_N * sizeof(scalar));
+    
+    // Convert hash to polynomial coefficients (only SMALL_DEGREE coefficients)
+    uint32_t small_deg = PARAM_N / PARAM_R;  // SMALL_DEGREE
+    for (uint32_t i = 0; i < small_deg && i * 4 < SHA3_DIGEST_SIZE; i++) {
         // Take 4 bytes to form a coefficient (mod q)
         uint32_t coeff = 0;
         for (int j = 0; j < 4 && i * 4 + j < SHA3_DIGEST_SIZE; j++) {
@@ -25,9 +31,9 @@ void hash_attribute_to_poly(const char *attr_name, poly output) {
         output[i] = coeff % PARAM_Q;
     }
     
-    // Fill remaining coefficients with pattern from hash
-    for (uint32_t i = SHA3_DIGEST_SIZE / 4; i < PARAM_N; i++) {
-        output[i] = hash[i % SHA3_DIGEST_SIZE] % PARAM_Q;
+    // Ensure polynomial is non-zero (add 1 to constant term if needed)
+    if (output[0] == 0) {
+        output[0] = 1;
     }
 }
 
@@ -102,9 +108,9 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // where A_i = A + f_i * g^T (augmented matrix for attribute i)
         
         // Compute f_i's inverse and put it in CRT domain (required by sample_pre_target)
-        poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));
-        h_inv[0] = 1; // Identity polynomial in coefficient domain
-        crt_representation(h_inv, LOG_R);
+        poly f_i_inv = (poly)calloc(PARAM_N, sizeof(scalar));
+        invert_poly(f_i_inv, f_i, PARAM_N, 1);
+        crt_representation(f_i_inv, LOG_R);
         
         // Construct augmented matrix A_i = A + f_i * g^T
         // This modifies mpk->A temporarily to include attribute-specific component
@@ -112,13 +118,13 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         
         // Sample preimage: find sk_i such that A_i · sk_i = target
         sample_pre_target(usk->sk_components[idx], mpk->A, msk->T,
-                         msk->cplx_T, msk->sch_comp, h_inv, target);
+                         msk->cplx_T, msk->sch_comp, f_i_inv, target);
         
         // Restore A to original state by removing f_i * g^T
         deconstruct_A_m(mpk->A, f_i);
         
         printf("[KeyGen]     Attribute %d complete!\n", idx + 1);
-        free(h_inv);
+        free(f_i_inv);
     }
     
     free(f_i);
