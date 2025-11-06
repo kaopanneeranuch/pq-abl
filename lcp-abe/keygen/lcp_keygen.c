@@ -58,9 +58,11 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         printf("[KeyGen]   Processing attribute %d/%d: %s\n",
                idx + 1, attr_set->count, attr->name);
         
+        printf("[KeyGen]     Step 1: Hashing attribute to polynomial...\n");
         // Step 1: Hash attribute to polynomial f_i = H(attr_i)
         hash_attribute_to_poly(attr->name, f_i);
         
+        printf("[KeyGen]     Step 2: Getting u_i from MPK...\n");
         // Step 2: Get u_i from MPK (attribute's public vector)
         if (attr->index >= mpk->n_attributes) {
             fprintf(stderr, "Error: Attribute index %d out of range\n", attr->index);
@@ -74,6 +76,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         memcpy(u_i, poly_matrix_element(mpk->U, mpk->n_attributes, 0, attr->index),
                PARAM_D * PARAM_N * sizeof(scalar));
         
+        printf("[KeyGen]     Step 3: Computing target vector...\n");
         // Step 3: Compute target = u_i + f_i * e_1, where e_1 = [1, 0, ..., 0]^T
         // This is the standard construction for lattice-based ABE:
         // target[0] = u_i[0] + f_i (coefficient-wise polynomial addition)
@@ -94,6 +97,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             }
         }
         
+        printf("[KeyGen]     Step 4: Sampling preimage using trapdoor (this may take a few seconds)...\n");
         // Step 4: Use Gaussian sampling to compute sk_i such that A · sk_i = target
         // This uses the trapdoor T_A and sample_pre_target function
         poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));
@@ -102,6 +106,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         sample_pre_target(usk->sk_components[idx], mpk->A, msk->T,
                          msk->cplx_T, msk->sch_comp, h_inv, target);
         
+        printf("[KeyGen]     Attribute %d complete!\n", idx + 1);
         free(h_inv);
     }
     
