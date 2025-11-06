@@ -114,14 +114,18 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         printf("[KeyGen]       DEBUG: Computing inverse of f_i...\n");
         printf("[KeyGen]       DEBUG: f_i[0]=%u, f_i[1]=%u, f_i[31]=%u\n", 
                f_i[0], f_i[1], f_i[31]);
-        invert_poly(f_i_inv, f_i, PARAM_N, 1);
+        
+        // Since f_i is a small-degree polynomial (degree < SMALL_DEGREE = PARAM_N/PARAM_R),
+        // we invert it modulo x^SMALL_DEGREE + 1, not x^PARAM_N + 1
+        uint32_t small_deg = PARAM_N / PARAM_R;
+        invert_poly(f_i_inv, f_i, small_deg, 1);
         
         printf("[KeyGen]       DEBUG: f_i_inv[0]=%u, f_i_inv[1]=%u\n", 
                f_i_inv[0], f_i_inv[1]);
         
         // Check if inversion succeeded (f_i_inv should not be all zeros)
         int is_zero = 1;
-        for (uint32_t k = 0; k < PARAM_N; k++) {
+        for (uint32_t k = 0; k < small_deg; k++) {
             if (f_i_inv[k] != 0) {
                 is_zero = 0;
                 break;
@@ -134,6 +138,13 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             free(target);
             free(u_i);
             return -1;
+        }
+        
+        printf("[KeyGen]       DEBUG: Replicating f_i_inv to all CRT components...\n");
+        // Replicate the small-degree inverse to all PARAM_R CRT components
+        // (since f_i was replicated, its inverse should be too)
+        for (uint32_t j = 1; j < PARAM_R; j++) {
+            memcpy(&f_i_inv[j * small_deg], f_i_inv, small_deg * sizeof(scalar));
         }
         
         printf("[KeyGen]       DEBUG: Converting f_i_inv to CRT domain...\n");
