@@ -66,7 +66,10 @@ void mpk_init(MasterPublicKey *mpk, uint32_t n_attributes) {
     mpk->matrix_dim = PARAM_D;
     
     // Allocate matrices
-    mpk->A = (poly_matrix)calloc(PARAM_D * PARAM_D * PARAM_N, sizeof(scalar));
+    // A should be (PARAM_M - PARAM_D) × PARAM_D, where PARAM_M = PARAM_D * (PARAM_K + 2)
+    // TrapGen expects this size for the extended matrix structure
+    size_t a_rows = PARAM_D * (PARAM_K + 2) - PARAM_D;  // PARAM_M - PARAM_D
+    mpk->A = (poly_matrix)calloc(a_rows * PARAM_D * PARAM_N, sizeof(scalar));
     mpk->U = (poly_matrix)calloc(PARAM_D * n_attributes * PARAM_N, sizeof(scalar));
 }
 
@@ -87,11 +90,12 @@ void mpk_free(MasterPublicKey *mpk) {
 
 void msk_init(MasterSecretKey *msk) {
     // Allocate trapdoor matrix T
-    msk->T = (poly_matrix)calloc(PARAM_D * PARAM_D * PARAM_N, sizeof(scalar));
+    // T should be 2*PARAM_D × PARAM_D*PARAM_K as expected by TrapGen
+    msk->T = (poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N, sizeof(scalar));
     
     // Allocate complex representations for Gaussian sampling
-    msk->cplx_T = (cplx_poly_matrix)calloc(PARAM_D * PARAM_D * SMALL_DEGREE, sizeof(cplx));
-    msk->sch_comp = (cplx_poly_matrix)calloc(PARAM_D * PARAM_D * SMALL_DEGREE, sizeof(cplx));
+    msk->cplx_T = (cplx_poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * SMALL_DEGREE, sizeof(cplx));
+    msk->sch_comp = (cplx_poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * SMALL_DEGREE, sizeof(cplx));
 }
 
 void msk_free(MasterSecretKey *msk) {
