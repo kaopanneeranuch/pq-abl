@@ -362,6 +362,7 @@ void sample_fz(signed_scalar *p, cplx_poly cplx_p, cplx_poly f, cplx *c, int dep
 */
 void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix sch_comp)
 	{
+	printf("[DEBUG] sample_perturb: START\n"); fflush(stdout);
 	//cplx T_coeffs[PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K], sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
 	//cplx *T_coeffs = malloc(PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K * sizeof(cplx)), sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
 	//cplx_poly_matrix T = T_coeffs, sch_comp = sch_comp_coeffs, c = c_coeffs, cplx_p = cplx_p_coeffs;
@@ -371,11 +372,13 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	// First sample dk independant centred polynomials with covariance (zeta^2 - alpha^2)
 	signed_poly_matrix p_2d = poly_matrix_element(p, 1, 2 * PARAM_D, 0);
 	
+	printf("[DEBUG] sample_perturb: Sampling %d coefficients with param=%f\n", PARAM_N * PARAM_D * PARAM_K, sqrt((PARAM_ZETA * PARAM_ZETA) - (PARAM_ALPHA * PARAM_ALPHA))); fflush(stdout);
 	real param = sqrt((PARAM_ZETA * PARAM_ZETA) - (PARAM_ALPHA * PARAM_ALPHA));
 	for(int i = 0 ; i < PARAM_N * PARAM_D * PARAM_K ; ++i)
 		{
 		p_2d[i] = SampleZ(0, param); // add q so that the coefficients are positive
 		}
+	printf("[DEBUG] sample_perturb: Initial sampling done\n"); fflush(stdout);
 
 	
 
@@ -390,19 +393,19 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	
 	matrix_cplx_crt_representation(cplx_p, PARAM_D * PARAM_K, 1);
 
-	
+	printf("[DEBUG] sample_perturb: CRT transform done, constructing first center\n"); fflush(stdout);
 	
 	
 	// Construct the new center (depends on the dk polynomials sampled before)
 	construct_first_center(c, T, cplx_p);
 
-	
+	printf("[DEBUG] sample_perturb: First center constructed, starting iterative sampling for %d polynomials\n", 2 * PARAM_D - 2); fflush(stdout);
 
 	
 	// Sample 2d - 2 polynomials iteratively
 	for(int i = 2 * PARAM_D - 1 ; i > 1 ; --i)
 		{
-
+		printf("[DEBUG] sample_perturb: Iteration i=%d, calling sample_fz\n", i); fflush(stdout);
 		
 		// Sample p[i] with covariance sch_comp[i,i] and center c[i]
 		// (copying sch_comp[i,i] and c[i] since they're going to be modified)
@@ -416,13 +419,13 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 		memcpy(center, c_i, PARAM_N * sizeof(cplx));
 		sample_fz(p_i, cplx_p, covariance, center, 0);
 		
-
+		printf("[DEBUG] sample_perturb: Iteration i=%d, sample_fz done\n", i); fflush(stdout);
 		
 		// Update the center
 		construct_new_center(c, sch_comp, cplx_p, i);
 		}
 	
-	
+	printf("[DEBUG] sample_perturb: Iterative sampling done, calling sample_2z for last 2 polynomials\n"); fflush(stdout);
 	// Sample the last 2 polynomials with the specialized sample_2z algorithm (do not forget to copy the covariance first)
 	cplx sch_comp_copy_coeffs[PARAM_N * 3];
 	cplx_poly_matrix sch_comp_copy = sch_comp_copy_coeffs;
@@ -435,6 +438,7 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	cplx_poly sch_comp_11 = triangular_poly_matrix_element(sch_comp_copy, 1, 1);
 	
 	sample_2z((signed_scalar *) p, cplx_p, sch_comp_00, sch_comp_01, sch_comp_11, c, 0);
+	printf("[DEBUG] sample_perturb: DONE!\n"); fflush(stdout);
 	}
 
 /*
