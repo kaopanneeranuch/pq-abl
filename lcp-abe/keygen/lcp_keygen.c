@@ -114,7 +114,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             free(f_i_inv);
             free(f_i);
             free(target);
-            free(u_i);
             return -1;
         }
         
