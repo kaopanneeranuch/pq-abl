@@ -26,15 +26,26 @@ int main(void) {
         fprintf(stderr, "Failed to parse logs/log.json\n"); return 1;
     }
 
-    /* Build a simple policy array (example: user_role:admin) */
-    AccessPolicy policy;
-    policy_init(&policy);
-    policy_parse("user_role:admin", &policy);
-    lsss_policy_to_matrix(&policy);
+    /* Build two test policies: AND and OR */
+    AccessPolicy policies[2];
+    
+    // Policy 1: user_role:admin AND team:storage-team
+    policy_init(&policies[0]);
+    policy_parse("user_role:admin AND team:storage-team", &policies[0]);
+    lsss_policy_to_matrix(&policies[0]);
+    printf("[Test] Policy 1: %s (threshold=%d/%d)\n", 
+           policies[0].expression, policies[0].threshold, policies[0].attr_count);
+    
+    // Policy 2: user_role:admin OR team:app-team
+    policy_init(&policies[1]);
+    policy_parse("user_role:admin OR team:app-team", &policies[1]);
+    lsss_policy_to_matrix(&policies[1]);
+    printf("[Test] Policy 2: %s (threshold=%d/%d)\n", 
+           policies[1].expression, policies[1].threshold, policies[1].attr_count);
 
     Microbatch *batches = NULL;
     uint32_t n_batches = 0;
-    if (process_logs_microbatch(&logs, &policy, 1, &mpk, &batches, &n_batches) != 0) {
+    if (process_logs_microbatch(&logs, policies, 2, &mpk, &batches, &n_batches) != 0) {
         fprintf(stderr, "Encrypt pipeline failed\n"); json_free_log_array(&logs); return 1;
     }
 
