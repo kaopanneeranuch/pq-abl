@@ -36,7 +36,7 @@
 #define PARAM_B 2
 */
 
-/*// q = 1073740609, d = 6, r = 32
+// q = 1073740609, d = 6, r = 32
 #define PARAM_Q 1073740609 // modulus q
 #define PARAM_K 30 // size of q
 #define PARAM_N 256 // degree of polynomials
@@ -49,21 +49,20 @@
 #define PARAM_B 2
 #define PARAM_TAU 12
 #define PARAM_GAMMA 12
-*/
 
-// === Module-LWE parameter set for LCP-ABE (128-bit level) ===
-#define PARAM_Q     12289      // modulus
-#define PARAM_K     14         // ≈ log2(q)
-#define PARAM_N     256        // polynomial degree
-#define PARAM_R     8          // irreducible factors (x^n + 1 split)
-#define PARAM_D     4          // module rank
-#define PARAM_SIGMA 4.2        // Gaussian σ for trapdoor & sampling
-#define PARAM_ALPHA (3.0 * PARAM_SIGMA)   // perturbation σ_α
-#define PARAM_ZETA  (8000.0)   // presampling σ_ζ (roughly 2^13; tune if needed)
-#define PARAM_T     12         // tailcut ≈ 12σ
-#define PARAM_B     8          // base-B decomposition width
-#define PARAM_TAU   12
-#define PARAM_GAMMA 12
+// // === Module-LWE parameter set for LCP-ABE (128-bit level) ===
+// #define PARAM_Q     12289      // modulus
+// #define PARAM_K     14         // ≈ log2(q)
+// #define PARAM_N     256        // polynomial degree
+// #define PARAM_R     8          // irreducible factors (x^n + 1 split)
+// #define PARAM_D     4          // module rank
+// #define PARAM_SIGMA 4.2        // Gaussian σ for trapdoor & sampling
+// #define PARAM_ALPHA (3.0 * PARAM_SIGMA)   // perturbation σ_α
+// #define PARAM_ZETA  (8000.0)   // presampling σ_ζ (roughly 2^13; tune if needed)
+// #define PARAM_T     12         // tailcut ≈ 12σ
+// #define PARAM_B     8          // base-B decomposition width
+// #define PARAM_TAU   12
+// #define PARAM_GAMMA 12
 
 
 /*
