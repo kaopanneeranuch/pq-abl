@@ -146,27 +146,6 @@ int view_ctobj(const char *filename) {
     
     fclose(fp);
     
-    // Try to read corresponding hash file
-    char hash_filename[512];
-    strncpy(hash_filename, filename, sizeof(hash_filename) - 10);
-    hash_filename[sizeof(hash_filename) - 10] = '\0';
-    
-    // Remove .bin extension and add _hash.txt
-    char *ext = strstr(hash_filename, ".bin");
-    if (ext) {
-        strcpy(ext, "_hash.txt");
-        
-        FILE *hash_fp = fopen(hash_filename, "r");
-        if (hash_fp) {
-            char hash_str[256];
-            if (fgets(hash_str, sizeof(hash_str), hash_fp)) {
-                printf("\n--- Hash ---\n");
-                printf("SHA3-256(CT_obj): %s", hash_str);
-            }
-            fclose(hash_fp);
-        }
-    }
-    
     printf("\n=== End of CT_obj ===\n\n");
     
     return 0;
