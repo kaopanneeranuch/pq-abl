@@ -7,7 +7,7 @@
 int main(void) {
     MasterPublicKey mpk;
     MasterSecretKey msk;
-    if (!lcp_setup(128, &mpk, &msk)) { // adjust param if your API differs
+    if (lcp_setup(128, &mpk, &msk) != 0) { // lcp_setup returns 0 on success
         fprintf(stderr,"Setup failed\n");
         return 1;
     }

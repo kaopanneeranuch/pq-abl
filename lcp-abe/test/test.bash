@@ -12,10 +12,9 @@ mkdir -p keys out/encrypted out/decrypted
 
 # Setup (produce MPK and MSK)
 gcc -O3 \
-  -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/setup -I./lcp-abe/util \
-  lcp-abe/test/setup.c \
-  -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
-  -o lcp-abe/test/test_setup
+    -I. -I./lcp-abe -I./lcp-abe/common -I./lcp-abe/setup -I./lcp-abe/util \
+    lcp-abe/test/setup.c -L./build -llcp_abe -lmodule_bfrs -lssl -lcrypto -lm \
+    -o lcp-abe/test/test_setup
 # To run later: ./lcp-abe/test/test_setup
 # expected: keys/MPK.bin keys/MSK.bin
 
