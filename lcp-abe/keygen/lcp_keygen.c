@@ -104,7 +104,8 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         printf("[KeyGen]       Computing dot product over %d polynomials\n", PARAM_M);
         
         // Allocate buffers once for the entire dot product computation
-        double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+        // NOTE: double_poly needs 2*PARAM_N elements for CRT domain multiplication
+        double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
         
         if (!temp_prod || !reduced) {
@@ -118,7 +119,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         }
         
         printf("[KeyGen]       Allocated buffers: temp_prod=%p (size=%zu), reduced=%p (size=%zu)\n",
-               (void*)temp_prod, PARAM_N * sizeof(double_scalar),
+               (void*)temp_prod, 2 * PARAM_N * sizeof(double_scalar),
                (void*)reduced, PARAM_N * sizeof(scalar));
         
         for (uint32_t j = 0; j < PARAM_M; j++) {
@@ -134,7 +135,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             }
             
             // Clear buffers for this iteration
-            memset(temp_prod, 0, PARAM_N * sizeof(double_scalar));
+            memset(temp_prod, 0, 2 * PARAM_N * sizeof(double_scalar));
             memset(reduced, 0, PARAM_N * sizeof(scalar));
             
             if (j < 2) {
