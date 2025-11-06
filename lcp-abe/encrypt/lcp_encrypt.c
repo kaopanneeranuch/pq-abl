@@ -263,7 +263,22 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         // s is k-dimensional vector
         // We compute weighted sum for each component j of output (m-dimensional)
         
+        // Allocate buffers once outside the loop to avoid repeated allocations
+        double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!temp_prod || !reduced) {
+            fprintf(stderr, "[Encrypt] ERROR: Failed to allocate temp buffers\n");
+            if (temp_prod) free(temp_prod);
+            if (reduced) free(reduced);
+            free(e_i);
+            goto cleanup_error;
+        }
+        
         printf("[Encrypt]     DEBUG: Computing C[%d] = B+ · s + e_i + λ·g\n", i);
+        
+        // s_0 is the first component of s (used in dot product)
+        poly s_0 = poly_matrix_element(s, 1, 0, 0);
+        
         for (uint32_t j = 0; j < PARAM_M; j++) {
             // C[i] and e_i are column vectors (m x 1), so nb_col = 1
             poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
@@ -275,41 +290,27 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
             // B_plus_attr[j] is the j-th polynomial in the row
             poly B_j = &B_plus_attr[j * PARAM_N];
             
-            // Multiply B_j by first component of s (simplified)
-            // s is column vector (k x 1), so nb_col = 1
-            poly s_0 = poly_matrix_element(s, 1, 0, 0);
-            
-            // NOTE: temp_prod needs 2*PARAM_N for CRT multiplication!
-            double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-            if (!temp_prod) {
-                fprintf(stderr, "[Encrypt] ERROR: Failed to allocate temp_prod\n");
-                free(e_i);
-                goto cleanup_error;
-            }
-            
+            // Multiply B_j by first component of s in CRT domain
             mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
             
-            // Properly reduce double_poly in CRT domain to poly
-            poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-            if (!reduced) {
-                fprintf(stderr, "[Encrypt] ERROR: Failed to allocate reduced\n");
-                free(temp_prod);
-                free(e_i);
-                goto cleanup_error;
-            }
+            // Reduce double_poly to poly (still in CRT domain)
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             
-            // Add to c_i_j
+            // Add to c_i_j (both in CRT domain)
             add_poly(c_i_j, c_i_j, reduced, PARAM_N - 1);
             
-            free(temp_prod);
-            free(reduced);
+            // Freeze to ensure coefficients are in [0, PARAM_Q)
+            freeze_poly(c_i_j, PARAM_N - 1);
             
             // Add share λ_i encoded in first coefficient (gadget encoding)
             if (j == 0) {
                 c_i_j[0] = (c_i_j[0] + shares[i]) % PARAM_Q;
             }
         }
+        
+        // Free buffers after loop completes
+        free(temp_prod);
+        free(reduced);
         
         free(e_i);
     }
