@@ -9,6 +9,16 @@
 // Policy Parsing
 // ============================================================================
 
+// Simple hash function to map attribute name to index [0, 127]
+static uint32_t attr_name_to_index(const char *attr_name) {
+    uint32_t hash = 5381;
+    int c;
+    while ((c = *attr_name++)) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+    return hash % 128; // Map to [0, 127] for our 128-attribute universe
+}
+
 // Simple policy parser for AND/OR/THRESHOLD policies
 // Supported formats:
 //   - "(attr1 AND attr2)" - Need all attributes
@@ -49,8 +59,10 @@ int policy_parse(const char *expression, AccessPolicy *policy) {
                 
                 // Check if it's not an operator keyword
                 if (strcmp(attr_buffer, "AND") != 0 && strcmp(attr_buffer, "OR") != 0) {
-                    // Add to policy attributes
-                    policy->attr_indices[policy->attr_count] = policy->attr_count;
+                    // Map attribute name to universe index using hash
+                    uint32_t attr_index = attr_name_to_index(attr_buffer);
+                    policy->attr_indices[policy->attr_count] = attr_index;
+                    printf("[Policy] Parsed attribute '%s' → index %u\n", attr_buffer, attr_index);
                     policy->attr_count++;
                 }
             }
@@ -180,10 +192,10 @@ int lsss_policy_to_matrix(AccessPolicy *policy) {
         policy->rho = (uint32_t *)calloc(policy->matrix_rows, sizeof(uint32_t));
         
         // Create identity-based sharing matrix
-        // Row i corresponds to attribute i
+        // Row i corresponds to attribute policy->attr_indices[i]
         // M[i][0] = 1, M[i][j] = random for j > 0
         for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            policy->rho[i] = i; // Row i → attribute i
+            policy->rho[i] = policy->attr_indices[i]; // Row i → actual attribute index in universe
             
             for (uint32_t j = 0; j < policy->matrix_cols; j++) {
                 if (i == 0 && j == 0) {
@@ -211,7 +223,7 @@ int lsss_policy_to_matrix(AccessPolicy *policy) {
         policy->rho = (uint32_t *)calloc(policy->matrix_rows, sizeof(uint32_t));
         
         for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            policy->rho[i] = i; // Row i → attribute i
+            policy->rho[i] = policy->attr_indices[i]; // Row i → actual attribute index in universe
             policy->share_matrix[i] = 1; // Each row gets the secret
         }
         
