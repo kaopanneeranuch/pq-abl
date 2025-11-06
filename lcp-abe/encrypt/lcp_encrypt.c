@@ -328,37 +328,86 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     // ========================================================================
     printf("[Encrypt] Encrypting symmetric key with challenge β\n");
     
+    printf("[Encrypt]   DEBUG: Allocating e_key (%d scalars)\n", PARAM_N);
     poly e_key = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!e_key) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate e_key\n");
+        goto cleanup_error;
+    }
+    printf("[Encrypt]   DEBUG: e_key allocated at %p\n", (void*)e_key);
+    
+    printf("[Encrypt]   DEBUG: Sampling e_key with sigma=%.2f\n", PARAM_SIGMA);
     SampleR_centered((signed_poly)e_key, PARAM_SIGMA);
+    printf("[Encrypt]   DEBUG: e_key sampling completed\n");
     
     // Make positive and convert to CRT
+    printf("[Encrypt]   DEBUG: Making e_key positive\n");
     for (int i = 0; i < PARAM_N; i++) {
         e_key[i] += PARAM_Q;
     }
+    printf("[Encrypt]   DEBUG: Converting e_key to CRT domain\n");
     crt_representation(e_key, LOG_R);
+    printf("[Encrypt]   DEBUG: e_key CRT conversion completed\n");
     
     // Start with error
+    printf("[Encrypt]   DEBUG: Copying e_key to ct_key\n");
     memcpy(ct_abe->ct_key, e_key, PARAM_N * sizeof(scalar));
+    printf("[Encrypt]   DEBUG: ct_key initialized with error term\n");
     
     // Add β · s[0] (simplified: use first component of s)
-    double_poly temp_prod = (double_poly)calloc(PARAM_N, sizeof(double_scalar));
+    // CRITICAL: double_poly must be 2*PARAM_N for CRT multiplication output
+    printf("[Encrypt]   DEBUG: Allocating temp_prod (2*%d = %d double_scalars)\n", 
+           PARAM_N, 2 * PARAM_N);
+    double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+    if (!temp_prod) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate temp_prod for ct_key\n");
+        free(e_key);
+        goto cleanup_error;
+    }
+    printf("[Encrypt]   DEBUG: temp_prod allocated at %p\n", (void*)temp_prod);
+    
     poly s_0 = poly_matrix_element(s, 1, 0, 0);  // s is column vector (k×1), nb_col=1
+    printf("[Encrypt]   DEBUG: s_0 address = %p\n", (void*)s_0);
+    
+    printf("[Encrypt]   DEBUG: Computing β · s_0 in CRT domain\n");
     mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
+    printf("[Encrypt]   DEBUG: Multiplication completed\n");
     
     // Properly reduce double_poly in CRT domain to poly
+    printf("[Encrypt]   DEBUG: Allocating reduced (%d scalars)\n", PARAM_N);
     poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!reduced) {
+        fprintf(stderr, "[Encrypt] ERROR: Failed to allocate reduced for ct_key\n");
+        free(temp_prod);
+        free(e_key);
+        goto cleanup_error;
+    }
+    printf("[Encrypt]   DEBUG: reduced allocated at %p\n", (void*)reduced);
+    
+    printf("[Encrypt]   DEBUG: Reducing double_poly to poly\n");
     reduce_double_crt_poly(reduced, temp_prod, LOG_R);
+    printf("[Encrypt]   DEBUG: Reduction completed\n");
     
     // Add to ct_key
+    printf("[Encrypt]   DEBUG: Adding reduced to ct_key\n");
     add_poly(ct_abe->ct_key, ct_abe->ct_key, reduced, PARAM_N - 1);
+    printf("[Encrypt]   DEBUG: Addition completed\n");
     
+    printf("[Encrypt]   DEBUG: Freeing temp_prod and reduced\n");
     free(temp_prod);
     free(reduced);
+    printf("[Encrypt]   DEBUG: Buffers freed\n");
     
     // Encode K_log into polynomial (pack bytes into coefficients)
+    printf("[Encrypt]   DEBUG: Encoding K_log into ct_key\n");
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         ct_abe->ct_key[i] = (ct_abe->ct_key[i] + key[i]) % PARAM_Q;
     }
+    printf("[Encrypt]   DEBUG: K_log encoded\n");
+    
+    printf("[Encrypt]   DEBUG: Freeing e_key\n");
+    free(e_key);
+    printf("[Encrypt]   DEBUG: e_key freed\n");
     
     printf("[Encrypt] LCP-ABE encryption complete\n");
     
