@@ -76,6 +76,10 @@ target_link_libraries(test_encrypt lcp_abe)
 add_executable(test_decrypt lcp-abe/test/decrypt.c)
 target_link_libraries(test_decrypt lcp_abe)
 
+# Utility to view CT_obj files
+add_executable(view_ctobj lcp-abe/util/view_ctobj.c)
+target_link_libraries(view_ctobj lcp_abe)
+
 # Installation
 install(TARGETS lcp_abe module_bfrs
         LIBRARY DESTINATION lib

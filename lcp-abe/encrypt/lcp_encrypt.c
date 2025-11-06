@@ -750,29 +750,20 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
     mkdir(output_dir, 0755);
 #endif
     
-    // Create filename
-    char filename[512];
-    snprintf(filename, sizeof(filename), "%s/batch_epoch%lu_policy%u.bin",
-             output_dir, batch->epoch_id, (uint32_t)batch->policy.attr_count);
-    
-    FILE *fp = fopen(filename, "wb");
-    if (!fp) {
-        fprintf(stderr, "Error: Cannot open file %s for writing\n", filename);
-        return -1;
-    }
-    
-    // Write batch header
-    fwrite(&batch->epoch_id, sizeof(uint64_t), 1, fp);
-    fwrite(&batch->n_logs, sizeof(uint32_t), 1, fp);
-    fwrite(batch->epoch_start, 32, 1, fp);
-    fwrite(batch->epoch_end, 32, 1, fp);
-    
-    // Write policy
-    fwrite(batch->policy.expression, MAX_POLICY_SIZE, 1, fp);
-    
-    // Write each encrypted log (CT_obj = {CT_sym, CT_ABE, meta})
+    // Save each CT_obj as a separate file
     for (uint32_t i = 0; i < batch->n_logs; i++) {
         const EncryptedLogObject *log = &batch->logs[i];
+        
+        // Create filename for this CT_obj
+        char filename[512];
+        snprintf(filename, sizeof(filename), "%s/ctobj_epoch%lu_log%u.bin",
+                 output_dir, batch->epoch_id, i + 1);
+        
+        FILE *fp = fopen(filename, "wb");
+        if (!fp) {
+            fprintf(stderr, "Error: Cannot open file %s for writing\n", filename);
+            return -1;
+        }
         
         // Write metadata
         fwrite(&log->metadata, sizeof(LogMetadata), 1, fp);
@@ -809,28 +800,22 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
             fwrite(&zero, sizeof(uint32_t), 1, fp);
         }
         
-        // Write hash (h_i = SHA3-256(CT_obj))
-        fwrite(log->hash, SHA3_DIGEST_SIZE, 1, fp);
-    }
-    
-    fclose(fp);
-    printf("[Save] Batch saved to %s\n", filename);
-    
-    // Save hashes to separate file
-    char hash_filename[512];
-    snprintf(hash_filename, sizeof(hash_filename), "%s/batch_epoch%lu_policy%u_hashes.txt",
-             output_dir, batch->epoch_id, (uint32_t)batch->policy.attr_count);
-    
-    fp = fopen(hash_filename, "w");
-    if (fp) {
-        for (uint32_t i = 0; i < batch->n_logs; i++) {
-            fprintf(fp, "Log %d: ", i);
+        fclose(fp);
+        printf("[Save] CT_obj saved to %s\n", filename);
+        
+        // Save hash to separate text file
+        char hash_filename[512];
+        snprintf(hash_filename, sizeof(hash_filename), "%s/ctobj_epoch%lu_log%u_hash.txt",
+                 output_dir, batch->epoch_id, i + 1);
+        
+        fp = fopen(hash_filename, "w");
+        if (fp) {
             for (int j = 0; j < SHA3_DIGEST_SIZE; j++) {
-                fprintf(fp, "%02x", batch->logs[i].hash[j]);
+                fprintf(fp, "%02x", log->hash[j]);
             }
             fprintf(fp, "\n");
+            fclose(fp);
         }
-        fclose(fp);
     }
     
     return 0;
