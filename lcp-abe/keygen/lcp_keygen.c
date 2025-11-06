@@ -144,8 +144,8 @@ int lcp_save_usk(const UserSecretKey *usk, const char *filename) {
         fwrite(&usk->attr_set.attrs[i], sizeof(Attribute), 1, fp);
     }
     
-    // Write secret key components
-    size_t sk_component_size = PARAM_D * PARAM_N;
+    // Write secret key components (each is PARAM_M x PARAM_N)
+    size_t sk_component_size = PARAM_M * PARAM_N;
     for (uint32_t i = 0; i < usk->n_components; i++) {
         fwrite(usk->sk_components[i], sizeof(scalar), sk_component_size, fp);
     }
@@ -176,8 +176,8 @@ int lcp_load_usk(UserSecretKey *usk, const char *filename) {
         fread(&usk->attr_set.attrs[i], sizeof(Attribute), 1, fp);
     }
     
-    // Read secret key components
-    size_t sk_component_size = PARAM_D * PARAM_N;
+    // Read secret key components (each is PARAM_M x PARAM_N)
+    size_t sk_component_size = PARAM_M * PARAM_N;
     for (uint32_t i = 0; i < n_components; i++) {
         fread(usk->sk_components[i], sizeof(scalar), sk_component_size, fp);
     }

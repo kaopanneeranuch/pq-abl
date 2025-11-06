@@ -124,8 +124,10 @@ void usk_init(UserSecretKey *usk, uint32_t n_components) {
     usk->n_components = n_components;
     usk->sk_components = (poly_matrix*)calloc(n_components, sizeof(poly_matrix));
     
+    // Each sk_component is a vector in R_q^m where m = PARAM_M = PARAM_D * (PARAM_K + 2)
+    // This is the output size from sample_pre_target
     for (uint32_t i = 0; i < n_components; i++) {
-        usk->sk_components[i] = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+        usk->sk_components[i] = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     }
 }
 
