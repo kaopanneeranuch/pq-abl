@@ -35,23 +35,24 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     printf("[Setup] Generating trapdoor matrix A and T_A...\n");
     TrapGen(mpk->A, msk->T);
     
-    // TrapGen returns T in CRT domain, but construct_complex_private_key expects coefficient domain
+    // TrapGen returns T in CRT domain, but construct_complex_private_key expects coefficient domain WITH SMALL VALUES
     // So convert T back to coefficient domain first
     printf("[Setup] Converting T to coefficient domain...\n");
     matrix_coeffs_representation(msk->T, 2 * PARAM_D, PARAM_D * PARAM_K, LOG_R);
     
-    // CRITICAL: Add q to T's coefficients to make them positive (required by construct_complex_private_key)
+    // Construct complex representation for Gaussian sampling
+    // IMPORTANT: This must be done BEFORE adding q, using the small signed values
+    printf("[Setup] Computing complex representation of trapdoor...\n");
+    construct_complex_private_key(msk->cplx_T, msk->sch_comp, msk->T);
+    
+    // NOW add q to T's coefficients to make them positive for storage/use
     printf("[Setup] Adding q to T coefficients...\n");
     for (int i = 0; i < PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K; i++) {
         msk->T[i] += PARAM_Q;
     }
     
-    // Construct complex representation for Gaussian sampling
-    printf("[Setup] Computing complex representation of trapdoor...\n");
-    construct_complex_private_key(msk->cplx_T, msk->sch_comp, msk->T);
-    
-    // Convert T back to CRT domain for storage/use
-    printf("[Setup] Converting T back to CRT domain...\n");
+    // Convert T to CRT domain for storage/use
+    printf("[Setup] Converting T to CRT domain...\n");
     matrix_crt_representation(msk->T, 2 * PARAM_D, PARAM_D * PARAM_K, LOG_R);
     
     // Step 2: Generate random public vectors u_i for each attribute
