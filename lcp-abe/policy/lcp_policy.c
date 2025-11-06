@@ -262,7 +262,6 @@ int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr
     // Check if policy is AND or OR
     int is_and = (strstr(policy->expression, "AND") != NULL);
     int is_or = (strstr(policy->expression, "OR") != NULL);
-    }
     
     if (is_and) {
         // Need ALL attributes
