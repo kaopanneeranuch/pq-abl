@@ -35,12 +35,27 @@ int main() {
     
     // Compute A * ω_A using multiply_by_A (which handles implicit identity)
     printf("\n[Test] Computing A * ω_A...\n");
+    printf("[Test] A is %zu scalars (D×(M-D) = %d×%d)\n", 
+           (size_t)(PARAM_D * (PARAM_M - PARAM_D) * PARAM_N),
+           PARAM_D, PARAM_M - PARAM_D);
+    printf("[Test] ω_A is %zu scalars (M×1 = %d×1)\n",
+           (size_t)(PARAM_M * PARAM_N), PARAM_M);
+    printf("[Test] Result will be %zu scalars (D×1 = %d×1)\n",
+           (size_t)(PARAM_D * PARAM_N), PARAM_D);
+    
     poly_matrix result = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     
     // ω_A is in CRT domain (from keygen), A is in CRT domain
+    printf("[Test] First 4 coeffs of ω_A (CRT): %u %u %u %u\n",
+           sk.omega_A[0], sk.omega_A[1], sk.omega_A[2], sk.omega_A[3]);
+    printf("[Test] First 4 coeffs of A (CRT): %u %u %u %u\n",
+           mpk.A[0], mpk.A[1], mpk.A[2], mpk.A[3]);
+    
     multiply_by_A(result, mpk.A, sk.omega_A);
     
     printf("[Test] Result computed (should be ≈ β)\n");
+    printf("[Test] First 4 coeffs of result (CRT): %u %u %u %u\n",
+           result[0], result[1], result[2], result[3]);
     
     // Compare result with β
     printf("\n[Compare] β vs A*ω_A:\n");
