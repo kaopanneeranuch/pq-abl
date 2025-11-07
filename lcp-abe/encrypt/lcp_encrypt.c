@@ -148,16 +148,31 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         return -1;
     }
     
-    // Compute A^T · s = (A^T is implicitly mpk->A transposed)
-    // For each row i of A^T (= column i of A):
-    for (uint32_t i = 0; i < PARAM_M; i++) {
+    // Compute A^T · s where A = [I_d | Ā]
+    // A is D×M with implicit identity in first D columns
+    // mpk->A stores only Ā (the D×(M-D) part)
+    // Result: C0 = A^T · s = [s; Ā^T · s] where:
+    //   - First D components = s (from identity part)
+    //   - Last (M-D) components = Ā^T · s (from stored part)
+    
+    // Copy s to first D components (identity contribution)
+    for (uint32_t i = 0; i < PARAM_D; i++) {
         poly result_i = poly_matrix_element(A_T_s, 1, i, 0);
+        poly s_i = poly_matrix_element(s, 1, i, 0);
+        memcpy(result_i, s_i, PARAM_N * sizeof(scalar));
+    }
+    
+    // Compute Ā^T · s for last (M-D) components
+    // Ā is D×(M-D), so Ā^T is (M-D)×D
+    // For each row i of Ā^T (= column i of Ā):
+    for (uint32_t i = 0; i < PARAM_M - PARAM_D; i++) {
+        poly result_i = poly_matrix_element(A_T_s, 1, i + PARAM_D, 0);
         
-        // Dot product of row i of A^T with s
-        // Row i of A^T = column i of A
+        // Dot product of row i of Ā^T with s
+        // Row i of Ā^T = column i of Ā
         for (uint32_t j = 0; j < PARAM_D; j++) {
-            // A[j][i] = column i, row j
-            poly A_ji = poly_matrix_element(mpk->A, PARAM_M, j, i);
+            // Ā[j][i] = row j, column i of stored matrix
+            poly A_ji = poly_matrix_element(mpk->A, PARAM_M - PARAM_D, j, i);
             poly s_j = poly_matrix_element(s, 1, j, 0);
             
             double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
