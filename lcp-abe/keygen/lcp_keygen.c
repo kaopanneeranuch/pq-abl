@@ -165,6 +165,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             
             // Add to accumulator
             add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
+            freeze_poly(temp_result, PARAM_N - 1);  // CRITICAL: Reduce modulo q after each addition
             
             if (j < 2) {
                 printf("[KeyGen]         [j=%d] Added to accumulator, temp_result[0]=%u\n", 

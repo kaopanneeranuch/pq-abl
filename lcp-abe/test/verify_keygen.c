@@ -83,6 +83,7 @@ int main() {
             reduce_double_crt_poly(reduced, prod, LOG_R);
             
             add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
+            freeze_poly(temp_result, PARAM_N - 1);  // CRITICAL: Reduce modulo q after each addition
             
             free(prod);
             free(reduced);
