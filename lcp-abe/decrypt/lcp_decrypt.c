@@ -65,29 +65,27 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: ct_key (initial, CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Compute the decryption term: ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
+    // Compute the decryption term: β·C0[0] + Σ(coeff[j]·ω[ρ(j)]·C[j])
+    // 
+    // NOTE: Encryption uses SIMPLIFIED C0 = s + e0 (not full A^T·s)
+    // So C0[0] = s[0] + e0[0], and β·C0[0] ≈ β·s[0]
     poly decryption_term = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // Step 1: Compute ω_A · C0
-    // Since C0[i] = s[i] + e0[i] for i < PARAM_D, and ω_A is m-dimensional,
-    // we compute the full inner product
-    printf("[Decrypt]   Computing ω_A · C0 (to get ω_A·s term)...\n");
-    for (uint32_t j = 0; j < PARAM_M; j++) {
-        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
-        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
-        
-        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-        mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
-        
-        poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-        reduce_double_crt_poly(prod_reduced, prod, LOG_R);
-        
-        add_poly(decryption_term, decryption_term, prod_reduced, PARAM_N - 1);
-        free(prod);
-        free(prod_reduced);
-    }
+    // Step 1: Compute β · C0[0] (simplified approach matching encryption)
+    printf("[Decrypt]   Computing β·C0[0] to approximate β·s[0]...\n");
+    poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);  // First polynomial of C0
     
-    printf("[Decrypt]   DEBUG: After ω_A·C0 (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+    mul_crt_poly(prod, mpk->beta, c0_0, LOG_R);
+    
+    poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+    reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+    
+    memcpy(decryption_term, prod_reduced, PARAM_N * sizeof(scalar));
+    free(prod);
+    free(prod_reduced);
+    
+    printf("[Decrypt]   DEBUG: After β·C0[0] (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
     
     // Step 2: Add Σ(coeff[j]·ω[ρ(j)]·C[j]) for policy-matching attributes
