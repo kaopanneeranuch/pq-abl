@@ -72,7 +72,8 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     poly decryption_term = (poly)calloc(PARAM_N, sizeof(scalar));
     
     // Step 1: Compute β · C0[0] (simplified approach matching encryption)
-    printf("[Decrypt]   Computing β·C0[0] to approximate β·s[0]...\n");
+    // IMPORTANT: Encryption does a CRT→coeffs→CRT round-trip, so we must too!
+    printf("[Decrypt]   Computing β·C0[0] with round-trip conversion...\n");
     poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);  // First polynomial of C0
     
     double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
@@ -81,11 +82,15 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
     reduce_double_crt_poly(prod_reduced, prod, LOG_R);
     
+    // Do the same round-trip as encryption: CRT → coeffs → CRT
+    coeffs_representation(prod_reduced, LOG_R);
+    crt_representation(prod_reduced, LOG_R);
+    
     memcpy(decryption_term, prod_reduced, PARAM_N * sizeof(scalar));
     free(prod);
     free(prod_reduced);
     
-    printf("[Decrypt]   DEBUG: After β·C0[0] (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Decrypt]   DEBUG: After β·C0[0] with round-trip (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
     
     // EXPERIMENTAL: Try using ONLY β·C0[0] without the Σ terms
