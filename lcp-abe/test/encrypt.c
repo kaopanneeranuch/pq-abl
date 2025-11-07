@@ -49,9 +49,23 @@ int main(void) {
         fprintf(stderr, "Encrypt pipeline failed\n"); json_free_log_array(&logs); return 1;
     }
 
+    printf("[Test] Created %d batches, now saving...\n", n_batches);
+
     for (uint32_t i = 0; i < n_batches; i++) {
-        save_encrypted_batch(&batches[i], "out/encrypted");
+        printf("[Test] Saving batch %d/%d (epoch=%lu, n_logs=%d)...\n", 
+               i+1, n_batches, batches[i].epoch_id, batches[i].n_logs);
+        
+        if (batches[i].logs == NULL) {
+            fprintf(stderr, "[Test] ERROR: Batch %d has NULL logs pointer!\n", i);
+            continue;
+        }
+        
+        if (save_encrypted_batch(&batches[i], "out/encrypted") != 0) {
+            fprintf(stderr, "[Test] Failed to save batch %d\n", i);
+        }
     }
+
+    printf("[Test] All batches saved successfully\n");
 
     json_free_log_array(&logs);
     printf("Encryption done. See out/encrypted/\n");
