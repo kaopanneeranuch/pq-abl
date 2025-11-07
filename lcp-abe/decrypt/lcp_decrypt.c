@@ -73,8 +73,23 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     
     // Step 1: Compute β · C0[0] (simplified approach matching encryption)
     // IMPORTANT: Encryption does a CRT→coeffs→CRT round-trip, so we must too!
-    printf("[Decrypt]   Computing β·C0[0] with round-trip conversion...\n");
+    printf("\n[Decrypt]   ========================================\n");
+    printf("[Decrypt]   Step 1: Computing β·C0[0] with round-trip conversion\n");
+    printf("[Decrypt]   ========================================\n");
+    
     poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);  // First polynomial of C0
+    
+    printf("[Decrypt]   C0[0] (CRT, first 8): ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, c0_0[i]);
+    }
+    printf("\n");
+    
+    printf("[Decrypt]   mpk->beta (CRT, first 8): ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, mpk->beta[i]);
+    }
+    printf("\n");
     
     double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
     mul_crt_poly(prod, mpk->beta, c0_0, LOG_R);
@@ -82,16 +97,33 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
     reduce_double_crt_poly(prod_reduced, prod, LOG_R);
     
+    printf("[Decrypt]   β·C0[0] after reduction (CRT, first 8): ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, prod_reduced[i]);
+    }
+    printf("\n");
+    
     // Do the same round-trip as encryption: CRT → coeffs → CRT
     coeffs_representation(prod_reduced, LOG_R);
+    printf("[Decrypt]   After coeffs_representation (COEFF, first 8): ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, prod_reduced[i]);
+    }
+    printf("\n");
+    
     crt_representation(prod_reduced, LOG_R);
+    printf("[Decrypt]   After crt_representation (CRT, first 8): ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, prod_reduced[i]);
+    }
+    printf("\n");
     
     memcpy(decryption_term, prod_reduced, PARAM_N * sizeof(scalar));
     free(prod);
     free(prod_reduced);
     
-    printf("[Decrypt]   DEBUG: After β·C0[0] with round-trip (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-           decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
+    printf("[Decrypt]   Final β·C0[0] stored in decryption_term\n");
+    printf("[Decrypt]   ========================================\n");
     
     // EXPERIMENTAL: Try using ONLY β·C0[0] without the Σ terms
     printf("[Decrypt]   EXPERIMENTAL: Testing decryption with ONLY β·C0[0]...\n");
@@ -111,10 +143,12 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     free(test_recovered);
     
     // Step 2: Add Σ(coeff[j]·ω[ρ(j)]·C[j]) for policy-matching attributes
-    printf("[Decrypt]   Computing Σ(coeff[j]·ω[ρ(j)]·C[j])...\n");
-    printf("[Decrypt]   DEBUG: n_coeffs=%d, ct_abe->policy.matrix_rows=%d\n", 
+    printf("\n[Decrypt]   ========================================\n");
+    printf("[Decrypt]   Step 2: Computing Σ(coeff[j]·ω[ρ(j)]·C[j])\n");
+    printf("[Decrypt]   ========================================\n");
+    printf("[Decrypt]   n_coeffs=%d, ct_abe->policy.matrix_rows=%d\n", 
            n_coeffs, ct_abe->policy.matrix_rows);
-    printf("[Decrypt]   DEBUG: ct_abe->C=%p, ct_abe->C0=%p, ct_abe->ct_key=%p\n",
+    printf("[Decrypt]   ct_abe->C=%p, ct_abe->C0=%p, ct_abe->ct_key=%p\n",
            (void*)ct_abe->C, (void*)ct_abe->C0, (void*)ct_abe->ct_key);
     
     for (uint32_t i = 0; i < n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
@@ -190,63 +224,151 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     free(direct_test);
     
     // Step 3: Subtract decryption_term from ct_key to recover encode(K_log) + small_error
-    printf("[Decrypt]   Subtracting decryption_term from ct_key...\n");
+    printf("\n[Decrypt]   ========================================\n");
+    printf("[Decrypt]   Step 3: Subtracting decryption_term from ct_key...\n");
+    printf("[Decrypt]   ========================================\n");
+    
+    // Show what we're subtracting
+    printf("[Decrypt]   decryption_term (CRT, first 8):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, decryption_term[i]);
+    }
+    printf("\n");
+    
     for (uint32_t i = 0; i < PARAM_N; i++) {
         // recovered = ct_key - decryption_term (mod Q)
         recovered[i] = (recovered[i] + PARAM_Q - decryption_term[i]) % PARAM_Q;
     }
     
+    printf("[Decrypt]   After subtraction (CRT, first 8):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, recovered[i]);
+    }
+    printf("\n");
+    
     printf("[Decrypt]   Converting recovered to coefficient domain...\n");
     coeffs_representation(recovered, LOG_R);
     
-    printf("[Decrypt]   DEBUG: First 4 recovered coefficients: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-           recovered[0], recovered[1], recovered[2], recovered[3]);
+    printf("[Decrypt]   After coeffs_representation (first 8):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, recovered[i]);
+    }
+    printf("\n");
+    
+    printf("[Decrypt]   In HEX (first 8):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=0x%08x ", i, recovered[i]);
+    }
+    printf("\n");
+    
+    printf("[Decrypt]   Extracted bytes (>> 24, first 8):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("%02x ", (uint8_t)(recovered[i] >> 24));
+    }
+    printf("\n");
+    printf("[Decrypt]   ========================================\n");
     
     // FINAL TEST: Try extracting K_log directly from ct_key WITHOUT any decryption
     // Maybe the scheme is so simplified that β·s[0] is not actually masking K_log effectively
-    printf("[Decrypt]   FINAL TEST: Extract K_log directly from ct_key...\n");
+    printf("\n[Decrypt] ========================================\n");
+    printf("[Decrypt]   FINAL TEST: Multi-method extraction\n");
+    printf("[Decrypt] ========================================\n");
     
     // Just convert ct_key to coefficient domain and extract
     memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
+    
+    printf("[Decrypt]   ct_key in CRT domain (first 8 coeffs):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, recovered[i]);
+    }
+    printf("\n");
+    
     coeffs_representation(recovered, LOG_R);
+    
+    printf("[Decrypt]   ct_key in COEFF domain (first 8 coeffs):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=%u ", i, recovered[i]);
+    }
+    printf("\n");
+    
+    // Show the full 32-bit values in hex
+    printf("[Decrypt]   ct_key coeffs in HEX (first 8):\n");
+    printf("[Decrypt]     ");
+    for (int i = 0; i < 8; i++) {
+        printf("[%d]=0x%08x ", i, recovered[i]);
+    }
+    printf("\n\n");
     
     // Try extracting from different bit positions
     printf("[Decrypt]   Testing different extraction methods:\n");
+    printf("[Decrypt]   ----------------------------------------\n");
     
     // Method 1: High 8 bits (>> 24)
-    uint8_t test1[4];
-    for (int i = 0; i < 4; i++) {
+    uint8_t test1[8];
+    for (int i = 0; i < 8; i++) {
         test1[i] = (uint8_t)((recovered[i] >> 24) & 0xFF);
     }
-    printf("[Decrypt]     High 8 bits (>> 24): %02x %02x %02x %02x\n",
+    printf("[Decrypt]   Method 1 - High 8 bits (>> 24):\n");
+    printf("[Decrypt]     Bytes 0-3: %02x %02x %02x %02x\n",
            test1[0], test1[1], test1[2], test1[3]);
+    printf("[Decrypt]     Bytes 4-7: %02x %02x %02x %02x\n",
+           test1[4], test1[5], test1[6], test1[7]);
     
     // Method 2: Bits 23-16 (>> 16)
-    uint8_t test2[4];
-    for (int i = 0; i < 4; i++) {
+    uint8_t test2[8];
+    for (int i = 0; i < 8; i++) {
         test2[i] = (uint8_t)((recovered[i] >> 16) & 0xFF);
     }
-    printf("[Decrypt]     Bits 23-16 (>> 16): %02x %02x %02x %02x\n",
+    printf("[Decrypt]   Method 2 - Bits 23-16 (>> 16):\n");
+    printf("[Decrypt]     Bytes 0-3: %02x %02x %02x %02x\n",
            test2[0], test2[1], test2[2], test2[3]);
+    printf("[Decrypt]     Bytes 4-7: %02x %02x %02x %02x\n",
+           test2[4], test2[5], test2[6], test2[7]);
     
-    // Method 3: Low 8 bits (& 0xFF)
-    uint8_t test3[4];
-    for (int i = 0; i < 4; i++) {
-        test3[i] = (uint8_t)(recovered[i] & 0xFF);
+    // Method 3: Bits 15-8 (>> 8)
+    uint8_t test3[8];
+    for (int i = 0; i < 8; i++) {
+        test3[i] = (uint8_t)((recovered[i] >> 8) & 0xFF);
     }
-    printf("[Decrypt]     Low 8 bits (& 0xFF): %02x %02x %02x %02x\n",
+    printf("[Decrypt]   Method 3 - Bits 15-8 (>> 8):\n");
+    printf("[Decrypt]     Bytes 0-3: %02x %02x %02x %02x\n",
            test3[0], test3[1], test3[2], test3[3]);
+    printf("[Decrypt]     Bytes 4-7: %02x %02x %02x %02x\n",
+           test3[4], test3[5], test3[6], test3[7]);
     
-    // Method 4: After modulo reduction (maybe values are > Q?)
-    uint8_t test4[4];
-    for (int i = 0; i < 4; i++) {
-        scalar reduced_val = recovered[i] % PARAM_Q;
-        test4[i] = (uint8_t)((reduced_val >> 24) & 0xFF);
+    // Method 4: Low 8 bits (& 0xFF)
+    uint8_t test4[8];
+    for (int i = 0; i < 8; i++) {
+        test4[i] = (uint8_t)(recovered[i] & 0xFF);
     }
-    printf("[Decrypt]     After mod Q, high 8: %02x %02x %02x %02x\n",
+    printf("[Decrypt]   Method 4 - Low 8 bits (& 0xFF):\n");
+    printf("[Decrypt]     Bytes 0-3: %02x %02x %02x %02x\n",
            test4[0], test4[1], test4[2], test4[3]);
+    printf("[Decrypt]     Bytes 4-7: %02x %02x %02x %02x\n",
+           test4[4], test4[5], test4[6], test4[7]);
     
-    printf("[Decrypt]   Expected K_log should be: fd ac 21 8f (from encryption log)\n");
+    // Method 5: After modulo reduction (maybe values are > Q?)
+    uint8_t test5[8];
+    for (int i = 0; i < 8; i++) {
+        scalar reduced_val = recovered[i] % PARAM_Q;
+        test5[i] = (uint8_t)((reduced_val >> 24) & 0xFF);
+    }
+    printf("[Decrypt]   Method 5 - After mod Q, high 8 (>> 24):\n");
+    printf("[Decrypt]     Bytes 0-3: %02x %02x %02x %02x\n",
+           test5[0], test5[1], test5[2], test5[3]);
+    printf("[Decrypt]     Bytes 4-7: %02x %02x %02x %02x\n",
+           test5[4], test5[5], test5[6], test5[7]);
+    
+    printf("[Decrypt]   ----------------------------------------\n");
+    printf("[Decrypt]   Expected K_log (first 8 bytes): fd ac 21 8f 49 9b 26 ce\n");
+    printf("[Decrypt] ========================================\n\n");
     
     // Use the standard extraction for now
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
