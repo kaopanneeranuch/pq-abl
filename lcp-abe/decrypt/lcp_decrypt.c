@@ -154,6 +154,19 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: Full decryption_term (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
     
+    // EXPERIMENTAL: Try direct extraction first to see what's in ct_key
+    printf("[Decrypt]   EXPERIMENTAL: Direct extraction from ct_key (no subtraction)...\n");
+    poly direct_test = (poly)calloc(PARAM_N, sizeof(scalar));
+    memcpy(direct_test, ct_abe->ct_key, PARAM_N * sizeof(scalar));
+    coeffs_representation(direct_test, LOG_R);
+    
+    printf("[Decrypt]   Direct ct_key coeffs (first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           direct_test[0], direct_test[1], direct_test[2], direct_test[3]);
+    printf("[Decrypt]   Direct extraction: [0]=0x%02x, [1]=0x%02x, [2]=0x%02x, [3]=0x%02x\n",
+           (uint8_t)(direct_test[0] >> 24), (uint8_t)(direct_test[1] >> 24), 
+           (uint8_t)(direct_test[2] >> 24), (uint8_t)(direct_test[3] >> 24));
+    free(direct_test);
+    
     // Step 3: Subtract decryption_term from ct_key to recover encode(K_log) + small_error
     printf("[Decrypt]   Subtracting decryption_term from ct_key...\n");
     for (uint32_t i = 0; i < PARAM_N; i++) {
