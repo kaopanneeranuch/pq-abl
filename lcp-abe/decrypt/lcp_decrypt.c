@@ -14,7 +14,7 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                     const UserSecretKey *usk,
                     const MasterPublicKey *mpk,
                     uint8_t key_out[AES_KEY_SIZE]) {
-    printf("\n[Decrypt] ===== LCP-ABE Decryption Start =====\n");
+    printf("\n[Decrypt] LCP-ABE Decryption Start \n");
     printf("[Decrypt] CT_ABE Policy: '%s'\n", ct_abe->policy.expression);
     printf("[Decrypt] CT_ABE Components: %u\n", ct_abe->n_components);
     printf("[Decrypt] User has %u attributes\n", usk->attr_set.count);
@@ -22,11 +22,10 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Check if user attributes satisfy policy
     printf("[Decrypt] Checking policy satisfaction...\n");
     if (!lsss_check_satisfaction(&ct_abe->policy, &usk->attr_set)) {
-        fprintf(stderr, "[Decrypt] ✗ Error: User attributes do not satisfy policy\n");
+        fprintf(stderr, "[Decrypt] Error: User attributes do not satisfy policy\n");
         return -1;
     }
-    printf("[Decrypt] ✓ Policy satisfied!\n");
-    printf("[Decrypt] ✓ Policy satisfied!\n");
+    printf("[Decrypt] Policy satisfied!\n");
     
     printf("[Decrypt] Computing reconstruction coefficients...\n");
     
@@ -111,12 +110,12 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     free(partial_sum);
     free(recovered);
     
-    printf("[Decrypt] ✓ K_log recovered successfully (first 16 bytes): ");
+    printf("[Decrypt] K_log recovered successfully (first 16 bytes): ");
     for (int i = 0; i < 16; i++) {
         printf("%02x", key_out[i]);
     }
     printf("\n");
-    printf("[Decrypt] ===== LCP-ABE Decryption End =====\n\n");
+    printf("[Decrypt] LCP-ABE Decryption End \n\n");
     return 0;
 }
 
@@ -165,11 +164,11 @@ int decrypt_log_symmetric(const SymmetricCiphertext *ct_sym,
     if (result != 0) {
         free(*plaintext_out);
         *plaintext_out = NULL;
-        fprintf(stderr, "[Decrypt AES] ✗ Error: AES-GCM decryption or authentication failed\n");
+        fprintf(stderr, "[Decrypt AES] Error: AES-GCM decryption or authentication failed\n");
         return -1;
     }
     
-    printf("[Decrypt AES] ✓ AES-GCM decryption successful\n");
+    printf("[Decrypt AES] AES-GCM decryption successful\n");
     return 0;
 }
 
@@ -239,7 +238,7 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
-        fprintf(stderr, "[Load] ✗ Error: Cannot open file %s\n", filename);
+        fprintf(stderr, "[Load] Error: Cannot open file %s\n", filename);
         return -1;
     }
     
@@ -247,15 +246,15 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     
     // Read metadata
     if (fread(&log->metadata, sizeof(LogMetadata), 1, fp) != 1) {
-        fprintf(stderr, "[Load] ✗ Error: Failed to read metadata\n");
+        fprintf(stderr, "[Load] Error: Failed to read metadata\n");
         fclose(fp);
         return -1;
     }
-    printf("[Load] ✓ Loaded metadata\n");
+    printf("[Load] Loaded metadata\n");
     
     // Read symmetric ciphertext (CT_sym)
     if (fread(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp) != 1) {
-        fprintf(stderr, "[Load] ✗ Error: Failed to read ct_len\n");
+        fprintf(stderr, "[Load] Error: Failed to read ct_len\n");
         fclose(fp);
         return -1;
     }
@@ -264,12 +263,12 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     fread(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
     fread(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
     fread(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
-    printf("[Load] ✓ Loaded CT_sym (size: %u bytes)\n", log->ct_sym.ct_len);
+    printf("[Load] Loaded CT_sym (size: %u bytes)\n", log->ct_sym.ct_len);
     
     // Read ABE ciphertext (CT_ABE)
     fread(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
     fread(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp);
-    printf("[Load] ✓ Loaded CT_ABE policy: '%s' (%u components)\n", 
+    printf("[Load] Loaded CT_ABE policy: '%s' (%u components)\n", 
            log->ct_abe.policy.expression, log->ct_abe.n_components);
     
     // Parse the policy to extract attribute indices
@@ -301,7 +300,7 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     }
     
     fclose(fp);
-    printf("[Load] ✓ Successfully loaded complete CT_obj\n");
+    printf("[Load] Successfully loaded complete CT_obj\n");
     return 0;
 }
 
@@ -332,9 +331,7 @@ int decrypt_ctobj_batch(const char **filenames,
     uint32_t abe_decryptions = 0;
     
     for (uint32_t i = 0; i < n_files; i++) {
-        printf("\n========================================\n");
         printf("[Decrypt] File %d/%d: %s\n", i + 1, n_files, filenames[i]);
-        printf("========================================\n");
         
         // Load CT_obj
         EncryptedLogObject log;
@@ -357,21 +354,26 @@ int decrypt_ctobj_batch(const char **filenames,
                 memcpy(k_log, cache[c].k_log, AES_KEY_SIZE);
                 found_in_cache = 1;
                 cache_hits++;
-                printf("[Decrypt]   ✓ Cache HIT! Reusing K_log from policy cache\n");
+                printf("[Decrypt]   Cache HIT! Reusing K_log from policy cache\n");
                 break;
             }
         }
         
         if (!found_in_cache) {
             // Cache miss - perform LCP-ABE decryption
-            printf("[Decrypt]   ✗ Cache MISS - Performing LCP-ABE decryption...\n");
+            printf("[Decrypt]   Cache MISS - Performing LCP-ABE decryption...\n");
             
-            if (lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log) != 0) {
-                fprintf(stderr, "[Decrypt]   Failed: Policy not satisfied or decryption error\n");
+            int decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
+            printf("[Decrypt]   LCP-ABE decrypt returned: %d\n", decrypt_result);
+            
+            if (decrypt_result != 0) {
+                fprintf(stderr, "[Decrypt]   FAILED: Policy not satisfied or decryption error\n");
+                fprintf(stderr, "[Decrypt]   Skipping this file and continuing...\n");
                 encrypted_log_free(&log);
                 continue;
             }
             
+            printf("[Decrypt]   LCP-ABE decryption succeeded!\n");
             abe_decryptions++;
             
             // Add to cache
@@ -380,7 +382,7 @@ int decrypt_ctobj_batch(const char **filenames,
                 memcpy(cache[n_cached].k_log, k_log, AES_KEY_SIZE);
                 cache[n_cached].valid = 1;
                 n_cached++;
-                printf("[Decrypt]   ✓ Added policy to cache (total cached: %d)\n", n_cached);
+                printf("[Decrypt]   Added policy to cache (total cached: %d)\n", n_cached);
             }
         }
         
@@ -388,15 +390,22 @@ int decrypt_ctobj_batch(const char **filenames,
         uint8_t *log_data = NULL;
         size_t log_len = 0;
         
-        if (decrypt_log_symmetric(&log.ct_sym, k_log, &log.metadata, 
-                                 &log_data, &log_len) != 0) {
-            fprintf(stderr, "[Decrypt]   Failed: AES-GCM decryption or authentication failed\n");
+        printf("[Decrypt]   Attempting AES-GCM decryption...\n");
+        int sym_result = decrypt_log_symmetric(&log.ct_sym, k_log, &log.metadata, 
+                                               &log_data, &log_len);
+        printf("[Decrypt]   AES-GCM decrypt returned: %d\n", sym_result);
+        
+        if (sym_result != 0) {
+            fprintf(stderr, "[Decrypt]   FAILED: AES-GCM decryption or authentication failed\n");
+            fprintf(stderr, "[Decrypt]   Skipping this file and continuing...\n");
             encrypted_log_free(&log);
             continue;
         }
         
         printf("[Decrypt]   ✓ Decrypted successfully (%zu bytes)\n", log_len);
-        printf("[Decrypt]   Log content: %.*s\n", (int)(log_len < 200 ? log_len : 200), log_data);
+        printf("[Decrypt]   \n");
+        printf("%.*s\n", (int)log_len, log_data);
+        printf("[Decrypt]   \n");
         
         // Save decrypted log
         if (output_dir) {
@@ -418,16 +427,22 @@ int decrypt_ctobj_batch(const char **filenames,
     }
     
     // Print statistics
-    printf("\n=== Decryption Statistics ===\n");
-    printf("Total files: %d\n", n_files);
+    printf("\n");
+    printf("=== Decryption Statistics ===\n");
+    printf("Total CT_obj files processed: %d\n", n_files);
     printf("Successfully decrypted: %d\n", success_count);
-    printf("Failed: %d\n", n_files - success_count);
+    printf("Failed (policy mismatch): %d\n", n_files - success_count);
+    
+    if (success_count > 0) {
+        printf("Saved %d decrypted logs to: %s/\n", success_count, output_dir);
+    }
+    
     printf("\n--- Policy Reuse Optimization ---\n");
     printf("LCP-ABE decryptions performed: %d\n", abe_decryptions);
-    printf("Cache hits (reused keys): %d\n", cache_hits);
+    printf("Cache hits (reused K_log): %d\n", cache_hits);
     printf("Unique policies encountered: %d\n", n_cached);
     if (n_files > 0) {
-        printf("Efficiency: %.1f%% reduction in ABE operations\n", 
+        printf("Efficiency gain: %.1f%% reduction in ABE operations\n", 
                100.0 * cache_hits / n_files);
     }
     

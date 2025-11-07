@@ -282,17 +282,28 @@ int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr
     // Count how many policy attributes match user's attributes
     uint32_t match_count = 0;
     
+    printf("[Policy Check] Checking attribute matches:\n");
     for (uint32_t i = 0; i < policy->attr_count; i++) {
         uint32_t policy_attr_index = policy->attr_indices[i];
+        printf("[Policy Check]   Policy attr %d: index=%u\n", i, policy_attr_index);
         
         // Check if this policy attribute index matches any user attribute index
+        int matched = 0;
         for (uint32_t j = 0; j < attr_set->count; j++) {
+            printf("[Policy Check]     Comparing with user attr %d: '%s' (index=%u)\n",
+                   j, attr_set->attrs[j].name, attr_set->attrs[j].index);
+            
             if (attr_set->attrs[j].index == policy_attr_index) {
                 match_count++;
-                printf("[Policy Check] ✓ Matched policy attr index %u with user attr '%s'\n",
-                       policy_attr_index, attr_set->attrs[j].name);
+                matched = 1;
+                printf("[Policy Check]     ✓ MATCH! Policy index %u == User attr '%s' (index %u)\n",
+                       policy_attr_index, attr_set->attrs[j].name, attr_set->attrs[j].index);
                 break;
             }
+        }
+        
+        if (!matched) {
+            printf("[Policy Check]     ✗ No match for policy index %u\n", policy_attr_index);
         }
     }
     
