@@ -120,12 +120,47 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     }
     matrix_crt_representation(e0, PARAM_M, 1, LOG_R);
     
-    memcpy(ct_abe_template->C0, e0, PARAM_M * PARAM_N * sizeof(scalar));
-    for (uint32_t i = 0; i < PARAM_D && i < PARAM_M; i++) {
-        poly c0_i = poly_matrix_element(ct_abe_template->C0, 1, i, 0);
-        poly s_i = poly_matrix_element(s, 1, i, 0);
-        add_poly(c0_i, c0_i, s_i, PARAM_N - 1);
+    // Compute C0 = A^T · s + e0 (where A is M x D)
+    // A^T is D x M, so A^T · s gives M x 1 result
+    poly_matrix A_T_s = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+    if (!A_T_s) {
+        fprintf(stderr, "[Batch Init] ERROR: Failed to allocate A_T_s\n");
+        free(s);
+        free(shares);
+        free(e0);
+        return -1;
     }
+    
+    // Compute A^T · s = (A^T is implicitly mpk->A transposed)
+    // For each row i of A^T (= column i of A):
+    for (uint32_t i = 0; i < PARAM_M; i++) {
+        poly result_i = poly_matrix_element(A_T_s, 1, i, 0);
+        
+        // Dot product of row i of A^T with s
+        // Row i of A^T = column i of A
+        for (uint32_t j = 0; j < PARAM_D; j++) {
+            // A[j][i] = column i, row j
+            poly A_ji = poly_matrix_element(mpk->A, PARAM_M, j, i);
+            poly s_j = poly_matrix_element(s, 1, j, 0);
+            
+            double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            mul_crt_poly(temp_prod, A_ji, s_j, LOG_R);
+            
+            poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            reduce_double_crt_poly(reduced, temp_prod, LOG_R);
+            
+            add_poly(result_i, result_i, reduced, PARAM_N - 1);
+            
+            free(temp_prod);
+            free(reduced);
+        }
+    }
+    
+    // C0 = A^T · s + e0
+    memcpy(ct_abe_template->C0, A_T_s, PARAM_M * PARAM_N * sizeof(scalar));
+    add_poly(ct_abe_template->C0, ct_abe_template->C0, e0, PARAM_N * PARAM_M - 1);
+    
+    free(A_T_s);
     
     // Compute C[i] for each policy row (SHARED)
     printf("[Batch Init]   Computing shared C[i] components\n");
