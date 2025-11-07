@@ -59,6 +59,9 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: ct_key (recovered initial, CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
+    // Compute sum of contributions from user's attributes
+    poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
+    
     // Compute: ω_A·C0 + Σ(coeff[i]·ω[ρ(i)]·C[i])
     // This reconstructs β·s[0] which we subtract from ct_key to get encode(K_log) + small_error
     
