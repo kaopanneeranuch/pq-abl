@@ -203,9 +203,16 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     // sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
     
     printf("[KeyGen]   Target = β (CORRECT CP-ABE formula)\n");
+    printf("[KeyGen]   DEBUG: target[0] before CRT (first 4): %u %u %u %u\n",
+           target_0[0], target_0[1], target_0[2], target_0[3]);
+    printf("[KeyGen]   DEBUG: beta (first 4, should match): %u %u %u %u\n",
+           mpk->beta[0], mpk->beta[1], mpk->beta[2], mpk->beta[3]);
     
     // Convert target to CRT domain for sampling
     matrix_crt_representation(target, PARAM_D, 1, LOG_R);
+    
+    printf("[KeyGen]   DEBUG: target[0] after CRT (first 4): %u %u %u %u\n",
+           target_0[0], target_0[1], target_0[2], target_0[3]);
     
     // Use sample_pre_target to sample ωA
     // Note: sample_pre_target expects h_inv parameter, we can use identity polynomial
