@@ -84,6 +84,9 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     
     random_poly(A_hat, PARAM_N * PARAM_D * PARAM_D - 1);
     
+    // Convert A_hat to CRT domain (required for mul_crt_poly_matrix)
+    matrix_crt_representation(A_hat, PARAM_D, PARAM_D, LOG_R);
+    
     // Decompose T = [T1 | T2] and compute A'·T = A_hat·T2 + T1
     poly_matrix T1 = msk->T;
     poly_matrix T2 = poly_matrix_element(msk->T, PARAM_D * PARAM_K, PARAM_D, 0);
