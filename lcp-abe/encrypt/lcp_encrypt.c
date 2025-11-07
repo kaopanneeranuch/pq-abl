@@ -299,15 +299,33 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     free(temp_prod);
     free(reduced);
     
+    // DEBUG: Show K_log being encoded
+    printf("[Batch Key] DEBUG: Encoding K_log (first 8 bytes): ");
+    for (int i = 0; i < 8 && i < AES_KEY_SIZE; i++) {
+        printf("%02x ", key[i]);
+    }
+    printf("\n");
+    
     // Encode K_log into ct_key (convert to coefficient domain)
     coeffs_representation(ct_abe->ct_key, LOG_R);
+    
+    printf("[Batch Key] DEBUG: ct_key before K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         ct_abe->ct_key[i] = (ct_abe->ct_key[i] + ((scalar)key[i] << 24)) % PARAM_Q;
     }
     
+    printf("[Batch Key] DEBUG: ct_key after K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
+    printf("[Batch Key] DEBUG: Encoded values in HEX: [0]=0x%08x, [1]=0x%08x, [2]=0x%08x, [3]=0x%08x\n",
+           ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
+    
     // Convert back to CRT
     crt_representation(ct_abe->ct_key, LOG_R);
+    
+    printf("[Batch Key] DEBUG: ct_key after CRT conversion (first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
     free(e_key);
     
