@@ -183,6 +183,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         // Add to sum_term (put in first component of k-vector)
         poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
         add_poly(sum_0, sum_0, temp_result, PARAM_N - 1);
+        freeze_poly(sum_0, PARAM_N - 1);  // CRITICAL: Reduce modulo q after addition
         free(temp_result);
         
         printf("[KeyGen]     Attribute %d processed successfully\n", i+1);
