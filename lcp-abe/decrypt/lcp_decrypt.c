@@ -442,22 +442,24 @@ int decrypt_ctobj_batch(const char **filenames,
         printf("[Decrypt]   User: %s, Timestamp: %s\n", 
                log.metadata.user_id, log.metadata.timestamp);
         
-        // Check cache for this policy
+        // CRITICAL FIX: Each log has UNIQUE K_log encoded in ct_key
+        // Cannot cache K_log by policy alone - must decrypt each ct_key independently
+        // The batch optimization shares C0/C[i], but ct_key is unique per log!
         uint8_t k_log[AES_KEY_SIZE];
-        int found_in_cache = 0;
+        int found_in_cache = 0;  // DISABLED: Force decryption for each unique ct_key
         
-        for (uint32_t c = 0; c < n_cached; c++) {
-            if (strcmp(cache[c].policy, log.ct_abe.policy.expression) == 0 && cache[c].valid) {
-                // Cache hit! Reuse the decrypted key
-                memcpy(k_log, cache[c].k_log, AES_KEY_SIZE);
-                found_in_cache = 1;
-                cache_hits++;
-                printf("[Decrypt]   Cache HIT! Reusing K_log from policy cache\n");
-                break;
-            }
-        }
+        // CACHE DISABLED - Each file has unique K_log
+        // for (uint32_t c = 0; c < n_cached; c++) {
+        //     if (strcmp(cache[c].policy, log.ct_abe.policy.expression) == 0 && cache[c].valid) {
+        //         memcpy(k_log, cache[c].k_log, AES_KEY_SIZE);
+        //         found_in_cache = 1;
+        //         cache_hits++;
+        //         printf("[Decrypt]   Cache HIT! Reusing K_log from policy cache\n");
+        //         break;
+        //     }
+        // }
         
-        if (!found_in_cache) {
+        if (!found_in_cache) {  // Always true now
             // Cache miss - perform LCP-ABE decryption
             printf("[Decrypt]   Cache MISS - Performing LCP-ABE decryption...\n");
             
