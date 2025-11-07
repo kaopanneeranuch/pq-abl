@@ -401,9 +401,9 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
     // Encode K_log into high-order bits using bit-shift scaling
-    // Scale by 2^(LOG_Q - 8) to place K_log in upper 8 bits
+    // Scale by 2^(PARAM_K - 8) to place K_log in upper 8 bits
     // This maximizes noise tolerance for LWE decryption
-    const uint32_t shift = LOG_Q - 8;  // 30 - 8 = 22 bits
+    const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         uint64_t encoded = ((uint64_t)key[i] << shift) % PARAM_Q;
         ct_abe->ct_key[i] = ((uint64_t)ct_abe->ct_key[i] + encoded) % PARAM_Q;

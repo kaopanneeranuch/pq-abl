@@ -180,9 +180,9 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     
     // Extract K_log by rounding to nearest byte value
     // Decoding inverts the encoding: K_log[i] = round(recovered[i] / 2^22)
-    printf("[Decrypt]   Extracting K_log using rounding (recovered >> %d):\n", LOG_Q - 8);
+    printf("[Decrypt]   Extracting K_log using rounding (recovered >> %d):\n", PARAM_K - 8);
     printf("[Decrypt]   ");
-    const uint32_t shift = LOG_Q - 8;  // 30 - 8 = 22 bits
+    const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
     for (int i = 0; i < 8; i++) {
         // Round to nearest: add 2^(shift-1) before right-shifting
         uint64_t rounded = ((uint64_t)recovered[i] + (1ULL << (shift - 1))) >> shift;
