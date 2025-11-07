@@ -96,11 +96,17 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         free(temp);
     }
     
-    // Subtract partial sum from ct_key (both in CRT domain)
-    sub_poly(recovered, recovered, partial_sum, PARAM_N - 1);
-    
-    // Convert recovered from CRT back to coefficient representation
+    // CRITICAL FIX: Convert both polynomials to coefficient domain before subtraction
+    // During encryption, K_log was encoded in coefficient domain, so decryption
+    // must also operate in coefficient domain to correctly recover K_log
+    printf("[Decrypt]   DEBUG: Converting recovered (ct_key) from CRT to coefficient domain\n");
     coeffs_representation(recovered, LOG_R);
+    printf("[Decrypt]   DEBUG: Converting partial_sum from CRT to coefficient domain\n");
+    coeffs_representation(partial_sum, LOG_R);
+    
+    // Now subtract in coefficient domain (matching encryption's addition in coefficient domain)
+    printf("[Decrypt]   DEBUG: Subtracting partial_sum from recovered (both in coefficient domain)\n");
+    sub_poly(recovered, recovered, partial_sum, PARAM_N - 1);
     
     printf("[Decrypt]   DEBUG: First 4 coefficients BEFORE extraction: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
