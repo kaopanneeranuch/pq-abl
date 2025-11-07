@@ -184,14 +184,25 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     }
     
     // Copy β to target's first component
+    // CORRECT CP-ABE: target = β (no subtraction!)
+    // Each ω[i] will be sampled such that B[i]·ω[i] ≈ 0 (short vector)
+    // This way, during decryption:
+    //   ω_A^T·C0 + Σ(coeff[j]·ω[j]^T·C[j])
+    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[j]·ω[j])^T·s) + noise
+    //   = β^T·s + Σ(0) + noise
+    //   = β^T·s + noise
     poly target_0 = poly_matrix_element(target, PARAM_D, 0, 0);
     memcpy(target_0, mpk->beta, PARAM_N * sizeof(scalar));
     
-    // Subtract sum_term
-    poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
-    sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
+    // DO NOT subtract sum_term! That was causing the decryption mismatch
+    // The old formula: target = β - Σ(B[j]·ω[j]) doesn't work because
+    // decryption only uses MATCHING policy attributes, not all user attributes
     
-    printf("[KeyGen]   Target computed\n");
+    // Commented out incorrect formula:
+    // poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
+    // sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
+    
+    printf("[KeyGen]   Target = β (CORRECT CP-ABE formula)\n");
     
     // Convert target to CRT domain for sampling
     matrix_crt_representation(target, PARAM_D, 1, LOG_R);

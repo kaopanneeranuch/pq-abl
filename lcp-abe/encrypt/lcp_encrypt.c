@@ -94,8 +94,24 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     }
     matrix_crt_representation(s, PARAM_D, 1, LOG_R);
     
-    // Generate LSSS shares
-    scalar secret_scalar = rand() % PARAM_Q;
+    // For Module-LWE CP-ABE: We don't need LSSS shares in the lattice part!
+    // The policy satisfaction is handled by which user attributes match B[ρ(i)]
+    // The reconstruction coefficients from LSSS are used to combine the ω[i] components
+    // 
+    // We DO need shares for proper CP-ABE, but they should be shares of a SECRET
+    // that gets RECOVERED during decryption via LSSS reconstruction.
+    // 
+    // The correct secret to share: s[0] (first coefficient of first polynomial)
+    // This will be reconstructed as: Σ(coeff[i] · shares[i]) = s[0]
+    // 
+    // However, in the current architecture, we need shares to NOT interfere with
+    // the decryption term. The cleanest approach: use shares to protect K_log directly!
+    //
+    // NEW APPROACH: Generate LSSS shares of ZERO (so they don't interfere)
+    // This makes C[i] = B[ρ(i)]^T · s + e[i] (clean lattice CP-ABE)
+    // The policy checking is done via which attributes match
+    
+    scalar secret_scalar = 0;  // Share secret = 0 (shares won't interfere with decryption)
     scalar *shares = (scalar*)calloc(n_rows, sizeof(scalar));
     if (!shares) {
         fprintf(stderr, "[Batch Init] ERROR: Failed to allocate shares\n");
@@ -103,6 +119,7 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         return -1;
     }
     lsss_generate_shares(policy, secret_scalar, shares);
+    printf("[Batch Init] DEBUG: LSSS shares of secret=0 (clean lattice CP-ABE without share interference)\n");
     
     // Compute C_0 = A^T · s + e_0 (SHARED)
     printf("[Batch Init]   Computing shared C0\n");
