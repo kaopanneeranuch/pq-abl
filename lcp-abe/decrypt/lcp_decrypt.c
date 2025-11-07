@@ -56,6 +56,9 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Copy ct_key as base
     memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
     
+    printf("[Decrypt]   DEBUG: ct_key (recovered initial, CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           recovered[0], recovered[1], recovered[2], recovered[3]);
+    
     // Compute sum of contributions from user's attributes
     poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
     
@@ -75,6 +78,9 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         free(prod);
         free(prod_reduced);
     }
+    
+    printf("[Decrypt]   DEBUG: partial_sum after ω_A·C0 (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
     
     // CRITICAL FIX: Map policy rows to user's omega vectors by attribute index
     // Policy row i corresponds to attribute rho[i], must match with user's omega[j]
@@ -161,8 +167,15 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             temp[k] = ((uint64_t)temp[k] * coefficients[i]) % PARAM_Q;
         }
         
+        printf("[Decrypt]   DEBUG: After coeff multiply (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               temp[0], temp[1], temp[2], temp[3]);
+        
         // Add to partial sum
         add_poly(partial_sum, partial_sum, temp, PARAM_N - 1);
+        
+        printf("[Decrypt]   DEBUG: partial_sum after adding component %d (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               i, partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
+        
         free(temp);
     }
     
