@@ -473,7 +473,17 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
                              metadata->resource_id,
                              metadata->action_type,
                              metadata->service_name);
-    printf("[AES-GCM] DEBUG: AAD prepared (len=%zu)\n", aad_len);
+    printf("[AES-GCM] DEBUG: AAD prepared (len=%zu): %.*s\n", aad_len, (int)aad_len, aad);
+    printf("[AES-GCM] DEBUG: K_log (full 32 bytes): ");
+    for (int i = 0; i < AES_KEY_SIZE; i++) {
+        printf("%02x", key[i]);
+    }
+    printf("\n");
+    printf("[AES-GCM] DEBUG: Nonce (12 bytes): ");
+    for (int i = 0; i < AES_NONCE_SIZE; i++) {
+        printf("%02x", nonce[i]);
+    }
+    printf("\n");
     
     // Encrypt with AES-GCM
     printf("[AES-GCM] DEBUG: Calling aes_gcm_encrypt\n");
@@ -487,6 +497,18 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
         ct_sym->ciphertext = NULL;
         return -1;
     }
+    
+    printf("[AES-GCM] DEBUG: Encryption succeeded\n");
+    printf("[AES-GCM] DEBUG: Tag (16 bytes): ");
+    for (int i = 0; i < 16; i++) {
+        printf("%02x", ct_sym->tag[i]);
+    }
+    printf("\n");
+    printf("[AES-GCM] DEBUG: Ciphertext (first 32 bytes): ");
+    for (int i = 0; i < 32 && i < log_len; i++) {
+        printf("%02x", ct_sym->ciphertext[i]);
+    }
+    printf("\n");
     
     printf("[AES-GCM] DEBUG: Encryption successful\n");
     return 0;

@@ -148,9 +148,24 @@ int decrypt_log_symmetric(const SymmetricCiphertext *ct_sym,
                              metadata->service_name);
     
     printf("[Decrypt AES] AAD: %.*s\n", (int)aad_len, aad);
-    printf("[Decrypt AES] Key (first 16 bytes): ");
-    for (int i = 0; i < 16; i++) {
+    printf("[Decrypt AES] Key (full 32 bytes): ");
+    for (int i = 0; i < AES_KEY_SIZE; i++) {
         printf("%02x", key[i]);
+    }
+    printf("\n");
+    printf("[Decrypt AES] Nonce (12 bytes): ");
+    for (int i = 0; i < 12; i++) {
+        printf("%02x", ct_sym->nonce[i]);
+    }
+    printf("\n");
+    printf("[Decrypt AES] Tag (16 bytes): ");
+    for (int i = 0; i < 16; i++) {
+        printf("%02x", ct_sym->tag[i]);
+    }
+    printf("\n");
+    printf("[Decrypt AES] Ciphertext (first 32 bytes): ");
+    for (int i = 0; i < 32 && i < ct_sym->ct_len; i++) {
+        printf("%02x", ct_sym->ciphertext[i]);
     }
     printf("\n");
     

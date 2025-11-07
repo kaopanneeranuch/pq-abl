@@ -80,8 +80,6 @@ int main(void) {
     for (uint32_t i = 0; i < n_files; i++) {
         free(ctobj_files[i]);
     }
-    
-    printf("\n=== Decryption Test Complete ===\n");
-    
+        
     return 0;
 }
