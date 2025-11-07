@@ -195,7 +195,8 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         
         // Compute C[i] = B[ρ(i)] · s[0] + share[i] · β · s[0] + e[i]
         // where B[ρ(i)] is a row vector of M polynomials
-        // CRITICAL: share[i] · β · s[0] must be added to EACH of the M polynomials
+        // CRITICAL: share[i] · β · s[0] should only be added to the FIRST polynomial (j=0)
+        // to avoid multiplying by M during the inner product in decryption
         
         double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
@@ -213,7 +214,7 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
             return -1;
         }
         
-        // Pre-compute share[i] · β · s[0] (this will be added to ALL M polynomials in C[i])
+        // Pre-compute share[i] · β · s[0] (this will be added ONLY to the first polynomial)
         poly s_0 = poly_matrix_element(s, 1, 0, 0);
         mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
         reduce_double_crt_poly(share_beta_s0, temp_prod, LOG_R);
@@ -229,13 +230,15 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
             poly e_i_j = poly_matrix_element(e_i, 1, j, 0);
             poly B_j = &B_plus_attr[j * PARAM_N];
             
-            // C[i][j] = B[j] · s[0] + share[i] · β · s[0] + e[i][j]
+            // C[i][j] = B[j] · s[0] + e[i][j]
             mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             add_poly(c_i_j, reduced, e_i_j, PARAM_N - 1);
             
-            // Add share[i] · β · s[0] to the ENTIRE polynomial (not just coefficient [0])
-            add_poly(c_i_j, c_i_j, share_beta_s0, PARAM_N - 1);
+            // Add share[i] · β · s[0] ONLY to the first polynomial (j=0)
+            if (j == 0) {
+                add_poly(c_i_j, c_i_j, share_beta_s0, PARAM_N - 1);
+            }
             
             freeze_poly(c_i_j, PARAM_N - 1);
         }
