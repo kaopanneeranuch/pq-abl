@@ -93,9 +93,11 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
         reduce_double_crt_poly(prod_reduced, prod, LOG_R);
         
-        // Convert to COEFF and add
+        // Convert to COEFF and add with modulo reduction
         coeffs_representation(prod_reduced, LOG_R);
-        add_poly(decryption_term, decryption_term, prod_reduced, PARAM_N - 1);
+        for (uint32_t k = 0; k < PARAM_N; k++) {
+            decryption_term[k] = (decryption_term[k] + prod_reduced[k]) % PARAM_Q;
+        }
         
         free(prod);
         free(prod_reduced);
@@ -142,9 +144,11 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
             reduce_double_crt_poly(prod_reduced, prod, LOG_R);
             
-            // Convert to COEFF and add
+            // Convert to COEFF and add with modulo reduction
             coeffs_representation(prod_reduced, LOG_R);
-            add_poly(temp_sum, temp_sum, prod_reduced, PARAM_N - 1);
+            for (uint32_t k = 0; k < PARAM_N; k++) {
+                temp_sum[k] = (temp_sum[k] + prod_reduced[k]) % PARAM_Q;
+            }
             
             free(prod);
             free(prod_reduced);
