@@ -399,13 +399,21 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     printf("[Encrypt]   DEBUG: Buffers freed\n");
     
     // Encode K_log into polynomial (encode bytes in FIRST 32 coefficients)
-    // Leave ct_key in CRT domain - encoding works in any representation
+    // CRITICAL: Must convert to coefficient domain before encoding!
+    printf("[Encrypt]   DEBUG: Converting ct_key to coefficient domain for K_log encoding\n");
+    crt_to_coef_poly(ct_abe->ct_key);
+    printf("[Encrypt]   DEBUG: ct_key converted to coefficient domain\n");
+    
     printf("[Encrypt]   DEBUG: Encoding K_log into first %d coefficients of ct_key\n", AES_KEY_SIZE);
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        // Encode each byte directly - the coefficient domain will be handled during decryption
+        // Encode each byte in high 8 bits (bits 24-31) of coefficient
         ct_abe->ct_key[i] = (ct_abe->ct_key[i] + ((scalar)key[i] << 24)) % PARAM_Q;
     }
     printf("[Encrypt]   DEBUG: K_log encoded successfully (bytes shifted to high bits)\n");
+    
+    printf("[Encrypt]   DEBUG: Converting ct_key back to CRT domain\n");
+    coef_to_crt_poly(ct_abe->ct_key);
+    printf("[Encrypt]   DEBUG: ct_key converted back to CRT domain\n");
     
     printf("[Encrypt]   DEBUG: Freeing e_key\n");
     free(e_key);
