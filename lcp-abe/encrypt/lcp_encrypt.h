@@ -26,6 +26,23 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
                     const MasterPublicKey *mpk,
                     ABECiphertext *ct_abe);
 
+// Batch-optimized ABE encryption: Shared components
+// Computes C0 and C[i] once per batch (reusable across all logs with same policy)
+// Returns secret s for use in per-log ct_key encryption
+int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
+                               const MasterPublicKey *mpk,
+                               ABECiphertext *ct_abe_template,
+                               poly_matrix *s_out);
+
+// Batch-optimized ABE encryption: Per-log component
+// Encrypts K_log using pre-computed s and shared C0/C[i]
+// Only computes ct_key = β·s + e_key + encode(K_log)
+int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
+                              const poly_matrix s,
+                              const MasterPublicKey *mpk,
+                              const ABECiphertext *ct_abe_template,
+                              ABECiphertext *ct_abe);
+
 // Encrypt log data with AES-GCM
 // Input: log data, K_log, nonce, AAD (metadata)
 // Output: symmetric ciphertext CT_sym
