@@ -59,8 +59,28 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: ct_key (recovered initial, CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Compute sum of contributions from user's attributes
-    poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
+    // Compute: ω_A·C0 + Σ(coeff[i]·ω[ρ(i)]·C[i])
+    // This reconstructs β·s[0] which we subtract from ct_key to get encode(K_log) + small_error
+    
+    // First, compute ω_A · C0
+    printf("[Decrypt]   Computing ω_A · C0...\n");
+    for (uint32_t j = 0; j < PARAM_M; j++) {
+        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
+        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
+        
+        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
+        
+        poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+        
+        add_poly(partial_sum, partial_sum, prod_reduced, PARAM_N - 1);
+        free(prod);
+        free(prod_reduced);
+    }
+    
+    printf("[Decrypt]   DEBUG: partial_sum after ω_A·C0 (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
     
     // CRITICAL FIX: Map policy rows to user's omega vectors by attribute index
     // Policy row i corresponds to attribute rho[i], must match with user's omega[j]
@@ -98,42 +118,17 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             return -1;
         }
         
-        // For each matching attribute, compute contribution using correct omega
-        printf("[Decrypt]   DEBUG: Allocating temp poly\n");
-        poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
-        if (!temp) {
-            fprintf(stderr, "[Decrypt] ERROR: Failed to allocate temp\n");
-            free(partial_sum);
-            free(recovered);
-            return -1;
-        }
-        
         // Compute inner product: ω_omega_idx^T · C_i
-        // C_i is m×1 column vector, ω is m×1 column vector
-        // Loop over all m=PARAM_M components
-        printf("[Decrypt]   DEBUG: Computing inner product for %d components (PARAM_M=%d)\n", PARAM_M, PARAM_M);
-        printf("[Decrypt]   DEBUG: Checking ct_abe->C[%d]=%p\n", i, (void*)ct_abe->C[i]);
+        printf("[Decrypt]   DEBUG: Computing ω·C[%d] inner product\n", i);
+        poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         
         for (uint32_t j = 0; j < PARAM_M; j++) {
-            if (j == 0) {
-                printf("[Decrypt]   DEBUG: Loop j=%d, accessing omega and C elements\n", j);
-            }
-            
-            // Use omega_idx (user's index) for omega, i (policy row) for C
             poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
-            
-            if (j == 0) {
-                printf("[Decrypt]   DEBUG: omega_ij=%p, about to access ct_abe->C[%d]\n", 
-                       (void*)omega_ij, i);
-            }
-            
             poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
             
-            // Multiply in CRT domain (produces 2*PARAM_N result)
             double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
             mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
             
-            // Reduce double_poly to poly (stays in CRT domain)
             poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
             reduce_double_crt_poly(prod_reduced, prod, LOG_R);
             
@@ -153,21 +148,21 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         // Add to partial sum
         add_poly(partial_sum, partial_sum, temp, PARAM_N - 1);
         
-        printf("[Decrypt]   DEBUG: partial_sum after adding component %d (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-               i, partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
+        printf("[Decrypt]   DEBUG: partial_sum after adding (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
         
         free(temp);
     }
     
-    // CRITICAL FIX: Convert both polynomials to coefficient domain before subtraction
-    // During encryption, K_log was encoded in coefficient domain, so decryption
-    // must also operate in coefficient domain to correctly recover K_log
+    // CRITICAL: Convert both polynomials to coefficient domain
+    // Encryption: ct_key = β·s[0] + e_key + encode(K_log)
+    // Decryption: ct_key - (ω_A·C0 + Σ coeff[i]·ω[ρ(i)]·C[i]) ≈ encode(K_log) + small_error
     printf("[Decrypt]   DEBUG: Converting recovered (ct_key) from CRT to coefficient domain\n");
     coeffs_representation(recovered, LOG_R);
     printf("[Decrypt]   DEBUG: Converting partial_sum from CRT to coefficient domain\n");
     coeffs_representation(partial_sum, LOG_R);
     
-    // Now subtract in coefficient domain (matching encryption's addition in coefficient domain)
+    // Subtract partial_sum to eliminate β·s[0] and recover encode(K_log)
     printf("[Decrypt]   DEBUG: Subtracting partial_sum from recovered (both in coefficient domain)\n");
     sub_poly(recovered, recovered, partial_sum, PARAM_N - 1);
     
