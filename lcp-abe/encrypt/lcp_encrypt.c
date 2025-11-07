@@ -629,17 +629,50 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     // Initialize this log's ciphertext
     abe_ct_init(ct_abe);
     ct_abe->policy = ct_abe_template->policy;
-    
-    // COPY shared components from template (shallow copy - pointers to same data)
-    // In production, you might want deep copy or reference counting
-    ct_abe->C0 = ct_abe_template->C0;
-    ct_abe->C = ct_abe_template->C;
     ct_abe->n_components = ct_abe_template->n_components;
+    
+    // DEEP COPY shared components from template (each log needs its own copy for serialization)
+    printf("[Batch Key]   Deep copying shared C0 (%d scalars)\n", PARAM_M * PARAM_N);
+    ct_abe->C0 = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+    if (!ct_abe->C0) {
+        fprintf(stderr, "[Batch Key] ERROR: Failed to allocate C0\n");
+        return -1;
+    }
+    memcpy(ct_abe->C0, ct_abe_template->C0, PARAM_M * PARAM_N * sizeof(scalar));
+    
+    // Deep copy C array
+    uint32_t n_rows = ct_abe_template->policy.matrix_rows;
+    printf("[Batch Key]   Deep copying shared C array (%d components)\n", n_rows);
+    ct_abe->C = (poly_matrix*)calloc(n_rows, sizeof(poly_matrix));
+    if (!ct_abe->C) {
+        fprintf(stderr, "[Batch Key] ERROR: Failed to allocate C array\n");
+        free(ct_abe->C0);
+        return -1;
+    }
+    
+    for (uint32_t i = 0; i < n_rows; i++) {
+        ct_abe->C[i] = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+        if (!ct_abe->C[i]) {
+            fprintf(stderr, "[Batch Key] ERROR: Failed to allocate C[%d]\n", i);
+            for (uint32_t j = 0; j < i; j++) {
+                free(ct_abe->C[j]);
+            }
+            free(ct_abe->C);
+            free(ct_abe->C0);
+            return -1;
+        }
+        memcpy(ct_abe->C[i], ct_abe_template->C[i], PARAM_M * PARAM_N * sizeof(scalar));
+    }
     
     // Allocate UNIQUE ct_key for this log
     ct_abe->ct_key = (poly)calloc(PARAM_N, sizeof(scalar));
     if (!ct_abe->ct_key) {
         fprintf(stderr, "[Batch Key] ERROR: Failed to allocate ct_key\n");
+        for (uint32_t i = 0; i < n_rows; i++) {
+            free(ct_abe->C[i]);
+        }
+        free(ct_abe->C);
+        free(ct_abe->C0);
         return -1;
     }
     
