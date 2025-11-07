@@ -59,6 +59,23 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Compute sum of contributions from user's attributes
     poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
     
+    // First, compute ω_A · C0 (this is the A^T·s + e_0 component)
+    printf("[Decrypt]   Computing ω_A · C0...\n");
+    for (uint32_t j = 0; j < PARAM_M; j++) {
+        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
+        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
+        
+        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
+        
+        poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+        
+        add_poly(partial_sum, partial_sum, prod_reduced, PARAM_N - 1);
+        free(prod);
+        free(prod_reduced);
+    }
+    
     // CRITICAL FIX: Map policy rows to user's omega vectors by attribute index
     // Policy row i corresponds to attribute rho[i], must match with user's omega[j]
     printf("[Decrypt]   Building attribute index mapping...\n");
