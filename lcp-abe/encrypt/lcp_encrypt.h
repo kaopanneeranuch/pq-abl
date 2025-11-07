@@ -9,23 +9,6 @@
 // Phase 3: Encryption
 // ============================================================================
 
-// LCP-ABE Encrypt a symmetric key under access policy
-// Input: K_log (256-bit key), policy W, MPK
-// Output: ABE ciphertext CT_ABE
-//
-// Encrypt(K_log, W, MPK) → CT_ABE:
-//   1. Convert policy W to LSSS matrix (M, ρ)
-//   2. Choose random s ∈ R_q
-//   3. Generate shares: λ = M · [s, r_1, ..., r_n]^T
-//   4. For each row i: compute C_i = s^T · A + e_i + λ_i · G
-//   5. Encrypt key: ct_key = s^T · u + e + encode(K_log)
-//   Return CT_ABE = (W, C_0, {C_i}, ct_key)
-//
-int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
-                    const AccessPolicy *policy,
-                    const MasterPublicKey *mpk,
-                    ABECiphertext *ct_abe);
-
 // Batch-optimized ABE encryption: Shared components
 // Computes C0 and C[i] once per batch (reusable across all logs with same policy)
 // Returns secret s for use in per-log ct_key encryption
@@ -51,12 +34,6 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
                          const uint8_t nonce[AES_NONCE_SIZE],
                          const LogMetadata *metadata,
                          SymmetricCiphertext *ct_sym);
-
-// Encrypt single log entry (combines ABE + AES-GCM)
-int encrypt_log_entry(const JsonLogEntry *log_entry,
-                     const AccessPolicy *policy,
-                     const MasterPublicKey *mpk,
-                     EncryptedLogObject *encrypted_log);
 
 // ============================================================================
 // Microbatch Processing
