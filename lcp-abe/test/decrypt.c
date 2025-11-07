@@ -26,13 +26,13 @@ int main(void) {
         fprintf(stderr, "Error: Failed to load MPK\n");
         return 1;
     }
-    printf("[Init] ✓ Loaded MPK\n");
+    printf("[Init] Loaded MPK\n");
     
     if (lcp_load_usk(&sk, "keys/SK_admin_storage.bin") != 0) {
         fprintf(stderr, "Error: Failed to load user secret key\n");
         return 1;
     }
-    printf("[Init] ✓ Loaded SK (attributes: %d)\n", sk.attr_set.count);
+    printf("[Init] Loaded SK (attributes: %d)\n", sk.attr_set.count);
     
     // Create output directory
     mkdir("out/decrypted", 0755);

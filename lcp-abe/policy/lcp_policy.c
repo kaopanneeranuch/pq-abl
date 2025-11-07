@@ -296,14 +296,14 @@ int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr
             if (attr_set->attrs[j].index == policy_attr_index) {
                 match_count++;
                 matched = 1;
-                printf("[Policy Check]     ✓ MATCH! Policy index %u == User attr '%s' (index %u)\n",
+                printf("[Policy Check]     MATCH! Policy index %u == User attr '%s' (index %u)\n",
                        policy_attr_index, attr_set->attrs[j].name, attr_set->attrs[j].index);
                 break;
             }
         }
         
         if (!matched) {
-            printf("[Policy Check]     ✗ No match for policy index %u\n", policy_attr_index);
+            printf("[Policy Check]     No match for policy index %u\n", policy_attr_index);
         }
     }
     
@@ -356,14 +356,27 @@ int lsss_compute_coefficients(const AccessPolicy *policy, const AttributeSet *at
     int is_or = (strstr(policy->expression, "OR") != NULL);
     
     if (is_or) {
-        // For OR policy: use first matching attribute with coefficient 1
+        // For OR policy: Find FIRST policy row whose attribute the user has
+        // Set coefficient=1 for that row only
+        *n_coeffs = 0;
         for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            if (i < attr_set->count) {
-                coefficients[0] = 1;
-                *n_coeffs = 1;
-                return 0;
+            // Get attribute index for this policy row
+            uint32_t policy_attr_idx = policy->rho[i];
+            
+            // Check if user has this attribute
+            for (uint32_t j = 0; j < attr_set->count; j++) {
+                if (attr_set->attrs[j].index == policy_attr_idx) {
+                    // Found matching attribute - use this row with coefficient 1
+                    coefficients[*n_coeffs] = 1;
+                    (*n_coeffs)++;
+                    printf("[LSSS] OR policy: Using policy row %d (attr idx %d) with coeff=1\n",
+                           i, policy_attr_idx);
+                    return 0;  // For OR, we only need ONE satisfied attribute
+                }
             }
         }
+        // Should not reach here if policy is satisfied
+        return -1;
     } else {
         // For AND policy: coefficients to reconstruct from all shares
         // Simplified: use equal weights (1/n for each)

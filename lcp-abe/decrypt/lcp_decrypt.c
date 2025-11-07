@@ -59,18 +59,44 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Compute sum of contributions from user's attributes
     poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    for (uint32_t i = 0; i < n_coeffs && i < usk->n_components; i++) {
-        // For each matching attribute, compute contribution
-        // Using ω_i vectors (m-dimensional)
+    // CRITICAL FIX: Map policy rows to user's omega vectors by attribute index
+    // Policy row i corresponds to attribute rho[i], must match with user's omega[j]
+    printf("[Decrypt]   Building attribute index mapping...\n");
+    
+    for (uint32_t i = 0; i < n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
+        // Get the attribute index for this policy row
+        uint32_t policy_attr_idx = ct_abe->policy.rho[i];
+        printf("[Decrypt]   Policy row %d → attribute index %d (coeff=%.6f)\n", 
+               i, policy_attr_idx, (double)coefficients[i] / PARAM_Q);
         
+        // Find corresponding omega_i in user's key by matching attribute index
+        int omega_idx = -1;
+        for (uint32_t j = 0; j < usk->attr_set.count; j++) {
+            if (usk->attr_set.attrs[j].index == policy_attr_idx) {
+                omega_idx = j;
+                printf("[Decrypt]     → Matched user omega[%d] (attr '%s')\n",
+                       j, usk->attr_set.attrs[j].name);
+                break;
+            }
+        }
+        
+        if (omega_idx == -1) {
+            fprintf(stderr, "[Decrypt] ERROR: Policy requires attr %d but user doesn't have it!\n", 
+                    policy_attr_idx);
+            free(partial_sum);
+            free(recovered);
+            return -1;
+        }
+        
+        // For each matching attribute, compute contribution using correct omega
         poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         
-        // Compute inner product: ω_i^T · C_i
-        // C_i is m×1 column vector, ω_i is m×1 column vector
+        // Compute inner product: ω_omega_idx^T · C_i
+        // C_i is m×1 column vector, ω is m×1 column vector
         // Loop over all m=PARAM_M components
         for (uint32_t j = 0; j < PARAM_M; j++) {
-            // Both omega_i and C[i] are m×1 column vectors, so nb_col=1
-            poly omega_ij = poly_matrix_element(usk->omega_i[i], 1, j, 0);
+            // Use omega_idx (user's index) for omega, i (policy row) for C
+            poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
             poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
             
             // Multiply in CRT domain (produces 2*PARAM_N result)
@@ -364,7 +390,7 @@ int decrypt_ctobj_batch(const char **filenames,
         // Load CT_obj
         EncryptedLogObject log;
         if (load_ctobj_file(filenames[i], &log) != 0) {
-            fprintf(stderr, "[Decrypt] ✗ Failed to load file\n");
+            fprintf(stderr, "[Decrypt] Failed to load file\n");
             continue;
         }
         
@@ -430,7 +456,7 @@ int decrypt_ctobj_batch(const char **filenames,
             continue;
         }
         
-        printf("[Decrypt]   ✓ Decrypted successfully (%zu bytes)\n", log_len);
+        printf("[Decrypt]   Decrypted successfully (%zu bytes)\n", log_len);
         printf("[Decrypt]   \n");
         printf("%.*s\n", (int)log_len, log_data);
         printf("[Decrypt]   \n");

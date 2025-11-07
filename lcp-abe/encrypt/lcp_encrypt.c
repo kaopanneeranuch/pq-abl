@@ -692,10 +692,10 @@ int encrypt_microbatch(const JsonLogEntry *logs,
         // Step 4: Compute hash h_i = SHA3-256(CT_obj)
         printf("[Microbatch]     Step 4: Computing SHA3-256 hash\n");
         sha3_256_log_object(encrypted_log, encrypted_log->hash);
-        printf("[Microbatch]     ✓ Log %d/%d encrypted successfully\n\n", i + 1, n_logs);
+        printf("[Microbatch]     Log %d/%d encrypted successfully\n\n", i + 1, n_logs);
     }
     
-    printf("[Microbatch]   ✓ Batch complete: %d logs encrypted with shared policy '%s'\n", 
+    printf("[Microbatch]   Batch complete: %d logs encrypted with shared policy '%s'\n", 
            n_logs, batch->policy.expression);
     printf("[Microbatch]   (Batching reduces per-log overhead via policy+epoch grouping)\n");
     return 0;
@@ -763,9 +763,9 @@ int process_logs_microbatch(const JsonLogArray *logs,
                 if (encrypt_microbatch(matching_logs, n_matching, &policies[p],
                                       mpk, epochs[e], &(*batches)[*n_batches]) == 0) {
                     (*n_batches)++;
-                    printf("[Process]   ✓ Microbatch %d created successfully\n", *n_batches);
+                    printf("[Process]   Microbatch %d created successfully\n", *n_batches);
                 } else {
-                    fprintf(stderr, "[Process]   ✗ Failed to create microbatch for epoch %lu, policy %d\n",
+                    fprintf(stderr, "[Process]   Failed to create microbatch for epoch %lu, policy %d\n",
                             epochs[e], p);
                 }
             }

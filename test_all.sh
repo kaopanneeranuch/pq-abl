@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 
 # 1. Clean build
 echo ">>> Step 1: Building project..."
-rm -rf build
+rm -rf build keys out
 mkdir -p build && cd build
 cmake -DUSE_OPENSSL=ON ..
 make -j$(nproc)
