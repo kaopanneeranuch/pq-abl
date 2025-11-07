@@ -202,15 +202,56 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: First 4 recovered coefficients: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Step 4: Extract K_log from high bits of recovered polynomial
-    printf("[Decrypt]   Extracting K_log from high bits...\n");
+    // FINAL TEST: Try extracting K_log directly from ct_key WITHOUT any decryption
+    // Maybe the scheme is so simplified that β·s[0] is not actually masking K_log effectively
+    printf("[Decrypt]   FINAL TEST: Extract K_log directly from ct_key...\n");
+    
+    // Just convert ct_key to coefficient domain and extract
+    memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
+    coeffs_representation(recovered, LOG_R);
+    
+    // Try extracting from different bit positions
+    printf("[Decrypt]   Testing different extraction methods:\n");
+    
+    // Method 1: High 8 bits (>> 24)
+    uint8_t test1[4];
+    for (int i = 0; i < 4; i++) {
+        test1[i] = (uint8_t)((recovered[i] >> 24) & 0xFF);
+    }
+    printf("[Decrypt]     High 8 bits (>> 24): %02x %02x %02x %02x\n",
+           test1[0], test1[1], test1[2], test1[3]);
+    
+    // Method 2: Bits 23-16 (>> 16)
+    uint8_t test2[4];
+    for (int i = 0; i < 4; i++) {
+        test2[i] = (uint8_t)((recovered[i] >> 16) & 0xFF);
+    }
+    printf("[Decrypt]     Bits 23-16 (>> 16): %02x %02x %02x %02x\n",
+           test2[0], test2[1], test2[2], test2[3]);
+    
+    // Method 3: Low 8 bits (& 0xFF)
+    uint8_t test3[4];
+    for (int i = 0; i < 4; i++) {
+        test3[i] = (uint8_t)(recovered[i] & 0xFF);
+    }
+    printf("[Decrypt]     Low 8 bits (& 0xFF): %02x %02x %02x %02x\n",
+           test3[0], test3[1], test3[2], test3[3]);
+    
+    // Method 4: After modulo reduction (maybe values are > Q?)
+    uint8_t test4[4];
+    for (int i = 0; i < 4; i++) {
+        scalar reduced_val = recovered[i] % PARAM_Q;
+        test4[i] = (uint8_t)((reduced_val >> 24) & 0xFF);
+    }
+    printf("[Decrypt]     After mod Q, high 8: %02x %02x %02x %02x\n",
+           test4[0], test4[1], test4[2], test4[3]);
+    
+    printf("[Decrypt]   Expected K_log should be: fd ac 21 8f (from encryption log)\n");
+    
+    // Use the standard extraction for now
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        // Extract from high 8 bits (matching encryption's << 24)
         key_out[i] = (uint8_t)((recovered[i] >> 24) & 0xFF);
     }
-    
-    printf("[Decrypt]   DEBUG: First 4 extracted K_log bytes: [0]=0x%02x, [1]=0x%02x, [2]=0x%02x, [3]=0x%02x\n",
-           key_out[0], key_out[1], key_out[2], key_out[3]);
     
     free(decryption_term);
     free(recovered);
