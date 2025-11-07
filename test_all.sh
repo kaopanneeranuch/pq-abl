@@ -19,9 +19,9 @@ echo ""
 
 # 2. Generate logs
 echo ">>> Step 2: Generating test logs..."
-# Generate 100 logs over 5 minutes (300 seconds) with 60-second epochs
-# This creates ~5 epochs with ~20 logs each for easier testing
-python3 gen_log.py -n 100 --epoch-duration 60 --jitter-seconds 15 --start-hours 0.1
+# Generate 10 logs over 5 minutes (300 seconds) with 60-second epochs
+# This creates ~5 epochs with ~2 logs each for easier testing
+python3 gen_log.py -n 10 --epoch-duration 60 --jitter-seconds 15 --start-hours 0.1
 echo "Generated logs/log.json"
 echo ""
 
