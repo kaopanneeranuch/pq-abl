@@ -62,31 +62,9 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Compute sum of contributions from user's attributes
     poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // Compute: ω_A·C0 + Σ(coeff[i]·ω[ρ(i)]·C[i])
-    // This reconstructs β·s[0] which we subtract from ct_key to get encode(K_log) + small_error
+    // SIMPLIFIED DECRYPTION: Only use C[i] components (shares are embedded there)
+    // Skip ω_A·C0 for now to test if that's the issue
     
-    // First, compute ω_A · C0
-    printf("[Decrypt]   Computing ω_A · C0...\n");
-    for (uint32_t j = 0; j < PARAM_M; j++) {
-        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
-        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
-        
-        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-        mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
-        
-        poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-        reduce_double_crt_poly(prod_reduced, prod, LOG_R);
-        
-        add_poly(partial_sum, partial_sum, prod_reduced, PARAM_N - 1);
-        free(prod);
-        free(prod_reduced);
-    }
-    
-    printf("[Decrypt]   DEBUG: partial_sum after ω_A·C0 (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-           partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
-    
-    // CRITICAL FIX: Map policy rows to user's omega vectors by attribute index
-    // Policy row i corresponds to attribute rho[i], must match with user's omega[j]
     printf("[Decrypt]   Building attribute index mapping...\n");
     printf("[Decrypt]   DEBUG: n_coeffs=%d, ct_abe->policy.matrix_rows=%d\n", 
            n_coeffs, ct_abe->policy.matrix_rows);
@@ -121,53 +99,52 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             return -1;
         }
         
-        // Compute inner product: ω_omega_idx^T · C_i
-        printf("[Decrypt]   DEBUG: Computing ω·C[%d] inner product\n", i);
-        poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
+        // EXPERIMENT: Only extract the share λ_i from C[i][0][0]
+        // The share was added to C[i][0][0] during encryption
+        // Let's see if just reconstructing the shares helps
         
-        for (uint32_t j = 0; j < PARAM_M; j++) {
-            poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
-            poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
-            
-            double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-            mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
-            
-            poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-            reduce_double_crt_poly(prod_reduced, prod, LOG_R);
-            
-            add_poly(temp, temp, prod_reduced, PARAM_N - 1);
-            free(prod);
-            free(prod_reduced);
+        poly c_i_0 = poly_matrix_element(ct_abe->C[i], 1, 0, 0);
+        
+        // Convert to coefficient domain to access the share
+        coeffs_representation(c_i_0, LOG_R);
+        
+        // The share is in the first coefficient
+        scalar share_value = c_i_0[0];
+        
+        printf("[Decrypt]   DEBUG: C[%d][0][0] (contains share) = %u\n", i, share_value);
+        
+        // Convert back
+        crt_representation(c_i_0, LOG_R);
+        
+        // Multiply by reconstruction coefficient and accumulate
+        scalar weighted_share = ((uint64_t)share_value * coefficients[i]) % PARAM_Q;
+        
+        printf("[Decrypt]   DEBUG: coeff[%d] * share = %u\n", i, weighted_share);
+        
+        // Add to first coefficient of partial_sum (in coefficient domain)
+        if (i == 0) {
+            coeffs_representation(partial_sum, LOG_R);
         }
+        partial_sum[0] = (partial_sum[0] + weighted_share) % PARAM_Q;
         
-        // Multiply by reconstruction coefficient
-        for (uint32_t k = 0; k < PARAM_N; k++) {
-            temp[k] = ((uint64_t)temp[k] * coefficients[i]) % PARAM_Q;
-        }
-        
-        printf("[Decrypt]   DEBUG: After coeff multiply (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-               temp[0], temp[1], temp[2], temp[3]);
-        
-        // Add to partial sum
-        add_poly(partial_sum, partial_sum, temp, PARAM_N - 1);
-        
-        printf("[Decrypt]   DEBUG: partial_sum after adding (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-               partial_sum[0], partial_sum[1], partial_sum[2], partial_sum[3]);
-        
-        free(temp);
+        printf("[Decrypt]   DEBUG: Accumulated share sum = %u\n", partial_sum[0]);
     }
     
-    // CRITICAL: Convert both polynomials to coefficient domain
-    // Encryption: ct_key = β·s[0] + e_key + encode(K_log)
-    // Decryption: ct_key - (ω_A·C0 + Σ coeff[i]·ω[ρ(i)]·C[i]) ≈ encode(K_log) + small_error
+    // EXPERIMENT: partial_sum now contains only the reconstructed share in first coeff
+    // ct_key contains β·s[0] + e_key + encode(K_log)
+    // Try: ct_key - (reconstructed_share * something)?
+    
     printf("[Decrypt]   DEBUG: Converting recovered (ct_key) from CRT to coefficient domain\n");
     coeffs_representation(recovered, LOG_R);
-    printf("[Decrypt]   DEBUG: Converting partial_sum from CRT to coefficient domain\n");
-    coeffs_representation(partial_sum, LOG_R);
     
-    // Subtract partial_sum to eliminate β·s[0] and recover encode(K_log)
-    printf("[Decrypt]   DEBUG: Subtracting partial_sum from recovered (both in coefficient domain)\n");
-    sub_poly(recovered, recovered, partial_sum, PARAM_N - 1);
+    // partial_sum is already in coefficient domain, contains reconstructed share in [0]
+    printf("[Decrypt]   DEBUG: Reconstructed share value: %u\n", partial_sum[0]);
+    printf("[Decrypt]   DEBUG: ct_key[0] before: %u\n", recovered[0]);
+    
+    // Try subtracting the share from first coefficient only
+    recovered[0] = (recovered[0] - partial_sum[0] + PARAM_Q) % PARAM_Q;
+    
+    printf("[Decrypt]   DEBUG: ct_key[0] after subtracting share: %u\n", recovered[0]);
     
     printf("[Decrypt]   DEBUG: First 4 coefficients BEFORE extraction: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
