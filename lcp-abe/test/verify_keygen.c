@@ -94,6 +94,7 @@ int main() {
         // Add to result[0] (first component of D-dimensional vector)
         poly result_0 = poly_matrix_element(result, PARAM_D, 0, 0);
         add_poly(result_0, result_0, temp_result, PARAM_N - 1);
+        freeze_poly(result_0, PARAM_N - 1);  // CRITICAL: Reduce modulo q after addition
         
         free(temp_result);
     }
