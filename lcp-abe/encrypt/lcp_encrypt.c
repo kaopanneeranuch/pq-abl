@@ -403,6 +403,10 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     printf("[Encrypt]   DEBUG: Converting ct_key to coefficient domain for K_log encoding\n");
     coeffs_representation(ct_abe->ct_key, LOG_R);
     printf("[Encrypt]   DEBUG: ct_key converted to coefficient domain\n");
+    printf("[Encrypt]   DEBUG: First 4 coefficients BEFORE encoding: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
+    printf("[Encrypt]   DEBUG: First 4 K_log bytes to encode: [0]=0x%02x, [1]=0x%02x, [2]=0x%02x, [3]=0x%02x\n",
+           key[0], key[1], key[2], key[3]);
     
     printf("[Encrypt]   DEBUG: Encoding K_log into first %d coefficients of ct_key\n", AES_KEY_SIZE);
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
@@ -410,6 +414,8 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
         ct_abe->ct_key[i] = (ct_abe->ct_key[i] + ((scalar)key[i] << 24)) % PARAM_Q;
     }
     printf("[Encrypt]   DEBUG: K_log encoded successfully (bytes shifted to high bits)\n");
+    printf("[Encrypt]   DEBUG: First 4 coefficients AFTER encoding: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
     printf("[Encrypt]   DEBUG: Converting ct_key back to CRT domain\n");
     crt_representation(ct_abe->ct_key, LOG_R);

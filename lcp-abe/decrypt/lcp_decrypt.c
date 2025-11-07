@@ -102,11 +102,17 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Convert recovered from CRT back to coefficient representation
     coeffs_representation(recovered, LOG_R);
     
+    printf("[Decrypt]   DEBUG: First 4 coefficients BEFORE extraction: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           recovered[0], recovered[1], recovered[2], recovered[3]);
+    
     // Extract key bytes from high bits of polynomial coefficients
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         // Extract from high 8 bits (matching encryption's << 24)
         key_out[i] = (uint8_t)((recovered[i] >> 24) & 0xFF);
     }
+    
+    printf("[Decrypt]   DEBUG: First 4 extracted K_log bytes: [0]=0x%02x, [1]=0x%02x, [2]=0x%02x, [3]=0x%02x\n",
+           key_out[0], key_out[1], key_out[2], key_out[3]);
     
     free(partial_sum);
     free(recovered);
