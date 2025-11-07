@@ -356,8 +356,8 @@ int lsss_compute_coefficients(const AccessPolicy *policy, const AttributeSet *at
     int is_or = (strstr(policy->expression, "OR") != NULL);
     
     if (is_or) {
-        // For OR policy: Find FIRST policy row whose attribute the user has
-        // Set coefficient=1 for that row only
+        // For OR policy: Use ALL policy rows where user has the attribute
+        // This allows proper reconstruction even if user has multiple matching attrs
         *n_coeffs = 0;
         for (uint32_t i = 0; i < policy->matrix_rows; i++) {
             // Get attribute index for this policy row
@@ -367,22 +367,70 @@ int lsss_compute_coefficients(const AccessPolicy *policy, const AttributeSet *at
             for (uint32_t j = 0; j < attr_set->count; j++) {
                 if (attr_set->attrs[j].index == policy_attr_idx) {
                     // Found matching attribute - use this row with coefficient 1
-                    coefficients[*n_coeffs] = 1;
+                    coefficients[i] = 1;  // CRITICAL: Use index i, not *n_coeffs
                     (*n_coeffs)++;
                     printf("[LSSS] OR policy: Using policy row %d (attr idx %d) with coeff=1\n",
                            i, policy_attr_idx);
-                    return 0;  // For OR, we only need ONE satisfied attribute
+                    break;  // Move to next policy row
                 }
             }
         }
-        // Should not reach here if policy is satisfied
-        return -1;
+        if (*n_coeffs == 0) {
+            return -1;  // No matching attributes found
+        }
+        return 0;
     } else {
-        // For AND policy: coefficients to reconstruct from all shares
-        // Simplified: use equal weights (1/n for each)
-        *n_coeffs = policy->matrix_rows;
+        // For AND policy: Must use ALL policy attributes
+        // The LSSS matrix structure determines reconstruction coefficients
+        // 
+        // For AND with matrix M (n×n), shares = M · [secret_vector]
+        // To reconstruct: secret = coeffs^T · shares
+        // We need: coeffs^T · M = [1, 0, 0, ...]
+        // 
+        // For the diagonal structure used above:
+        // M = [[1, 0, ...], [0, 1, ...], ...]
+        // Reconstruction: coeff[0] = 1, coeff[i>0] = 0
+        
+        memset(coefficients, 0, policy->matrix_rows * sizeof(scalar));
+        *n_coeffs = 0;
+        
+        // Verify user has ALL policy attributes
         for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            coefficients[i] = 1; // Simplified: equal contribution
+            uint32_t policy_attr_idx = policy->rho[i];
+            
+            // Check if user has this attribute
+            int has_attr = 0;
+            for (uint32_t j = 0; j < attr_set->count; j++) {
+                if (attr_set->attrs[j].index == policy_attr_idx) {
+                    has_attr = 1;
+                    (*n_coeffs)++;
+                    break;
+                }
+            }
+            
+            if (!has_attr) {
+                // User missing required attribute - should not happen if policy satisfied
+                return -1;
+            }
+        }
+        
+        // For the diagonal LSSS matrix structure, reconstruction is:
+        // - Use coefficient 1 for FIRST matching row (gets the secret)
+        // - Use coefficient 0 for other rows (they have zero shares in our structure)
+        // 
+        // However, with shares of secret=0 in encryption, all shares are 0,
+        // so coefficients don't matter! We still need to process all rows
+        // to compute Σ(coeff[i] * B[i] * ω[i]) in decryption.
+        //
+        // For correct decryption when all policy attrs match user attrs:
+        // Set ALL coefficients to 1 so that:
+        //   Σ coeff[i] * B[i] * ω[i] = Σ B[i] * ω[i] (all matching attrs)
+        // matches the keygen formula: target = β - Σ B[i] * ω[i]
+        
+        for (uint32_t i = 0; i < policy->matrix_rows; i++) {
+            coefficients[i] = 1;  // Use all matching attributes
+            printf("[LSSS] AND policy: Using policy row %d (attr idx %d) with coeff=1\n",
+                   i, policy->rho[i]);
         }
     }
     

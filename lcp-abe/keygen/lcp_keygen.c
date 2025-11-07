@@ -38,6 +38,11 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     printf("[KeyGen] Sampling %d secret vectors ωi (m=%d dimensions each)...\n", 
            attr_set->count, PARAM_M);
     
+    // For proper lattice CP-ABE, we need B_i · ω_i ≈ 0 (small noise)
+    // However, we don't have trapdoors for B_i matrices
+    // Solution: Sample ω_i as short random vectors (they will contribute noise)
+    // AND adjust the keygen target to compensate: target = β - Σ(B_i · ω_i)
+    
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
         printf("[KeyGen]   Attribute %d/%d: %s\n", i+1, attr_set->count, attr->name);
@@ -184,35 +189,38 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     }
     
     // Copy β to target's first component
-    // CORRECT CP-ABE: target = β (no subtraction!)
-    // Each ω[i] will be sampled such that B[i]·ω[i] ≈ 0 (short vector)
-    // This way, during decryption:
-    //   ω_A^T·C0 + Σ(coeff[j]·ω[j]^T·C[j])
-    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[j]·ω[j])^T·s) + noise
-    //   = β^T·s + Σ(0) + noise
-    //   = β^T·s + noise
+    // Modified CP-ABE formula to handle non-zero B[i]·ω[i]:
+    // target = β - Σ(B[i]·ω[i]) for ALL user attributes
+    // This way: A·ω_A = β - Σ(B[user_attrs]·ω[user_attrs])
+    // 
+    // During decryption (assuming policy attrs ⊆ user attrs):
+    //   ω_A·C0 + Σ(coeff[j]·ω[j]·C[j])
+    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[j]·ω[j])·s[0])
+    //   = (β - Σ(B[i]·ω[i]))^T·s + Σ(coeff[j]·(B[j]·ω[j])·s[0])
+    //   = β·s[0] - Σ_i(B[i]·ω[i])·s[0] + Σ_j coeff[j]·(B[j]·ω[j])·s[0]
+    //
+    // For policy attrs that match user attrs (j ∈ user attrs):
+    //   = β·s[0] + Σ_j (coeff[j] - 1)·(B[j]·ω[j])·s[0]
+    //
+    // By LSSS property: Σ coeff[j] = 1 (for matching attrs)
+    // So if ALL policy attrs match user attrs, the B terms cancel!
     poly target_0 = poly_matrix_element(target, PARAM_D, 0, 0);
     memcpy(target_0, mpk->beta, PARAM_N * sizeof(scalar));
     
-    // DO NOT subtract sum_term! That was causing the decryption mismatch
-    // The old formula: target = β - Σ(B[j]·ω[j]) doesn't work because
-    // decryption only uses MATCHING policy attributes, not all user attributes
+    // CRITICAL FIX: Subtract sum_term to compensate for non-zero B[i]·ω[i]
+    poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
+    sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
     
-    // Commented out incorrect formula:
-    // poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
-    // sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
-    
-    printf("[KeyGen]   Target = β (CORRECT CP-ABE formula)\n");
-    printf("[KeyGen]   DEBUG: target[0] before CRT (first 4): %u %u %u %u\n",
-           target_0[0], target_0[1], target_0[2], target_0[3]);
-    printf("[KeyGen]   DEBUG: beta (first 4, should match): %u %u %u %u\n",
+    printf("[KeyGen]   Target = β - Σ(B[i]·ω[i]) (CORRECTED formula)\n");
+    printf("[KeyGen]   DEBUG: beta (first 4): %u %u %u %u\n",
            mpk->beta[0], mpk->beta[1], mpk->beta[2], mpk->beta[3]);
+    printf("[KeyGen]   DEBUG: sum_term (first 4): %u %u %u %u\n",
+           sum_0[0], sum_0[1], sum_0[2], sum_0[3]);
+    printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
+           target_0[0], target_0[1], target_0[2], target_0[3]);
     
     // Convert target to CRT domain for sampling
     matrix_crt_representation(target, PARAM_D, 1, LOG_R);
-    
-    printf("[KeyGen]   DEBUG: target[0] after CRT (first 4): %u %u %u %u\n",
-           target_0[0], target_0[1], target_0[2], target_0[3]);
     
     // Use sample_pre_target to sample ωA
     // Note: sample_pre_target expects h_inv parameter, we can use identity polynomial

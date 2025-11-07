@@ -34,7 +34,8 @@ int main() {
     printf("[Load] SK loaded (attributes: %d)\n", sk.attr_set.count);
     
     // Compute A * ω_A using multiply_by_A (which handles implicit identity)
-    printf("\n[Test] Computing A * ω_A...\n");
+    printf("\n[Test] Computing A * ω_A + Σ(B[i] * ω[i])...\n");
+    printf("[Test] This should equal β (with small Gaussian error)\n");
     printf("[Test] A is %zu scalars (D×(M-D) = %d×%d)\n", 
            (size_t)(PARAM_D * (PARAM_M - PARAM_D) * PARAM_N),
            PARAM_D, PARAM_M - PARAM_D);
@@ -51,14 +52,57 @@ int main() {
     printf("[Test] First 4 coeffs of A (CRT): %u %u %u %u\n",
            mpk.A[0], mpk.A[1], mpk.A[2], mpk.A[3]);
     
+    // Step 1: Compute A · ω_A
     multiply_by_A(result, mpk.A, sk.omega_A);
     
-    printf("[Test] Result computed (should be ≈ β)\n");
-    printf("[Test] First 4 coeffs of result (CRT): %u %u %u %u\n",
+    printf("[Test] A*ω_A computed (first 4 coeffs in CRT): %u %u %u %u\n",
+           result[0], result[1], result[2], result[3]);
+    
+    // Step 2: Add Σ(B[i] · ω[i]) for all user attributes
+    printf("[Test] Computing Σ(B[i] · ω[i]) for %d user attributes\n", sk.attr_set.count);
+    
+    for (uint32_t i = 0; i < sk.attr_set.count; i++) {
+        uint32_t attr_idx = sk.attr_set.attrs[i].index;
+        printf("[Test]   Processing attribute %d/%d (index %d: %s)\n",
+               i+1, sk.attr_set.count, attr_idx, sk.attr_set.attrs[i].name);
+        
+        // Get B_plus[attr_idx] - this is a row of M polynomials
+        poly_matrix B_plus_i = &mpk.B_plus[attr_idx * PARAM_M * PARAM_N];
+        
+        // Compute B[i] · ω[i] as inner product (sum over M polynomials)
+        poly temp_result = (poly)calloc(PARAM_N, sizeof(scalar));
+        
+        for (uint32_t j = 0; j < PARAM_M; j++) {
+            poly B_ij = &B_plus_i[j * PARAM_N];
+            poly omega_ij = poly_matrix_element(sk.omega_i[i], 1, j, 0);
+            
+            double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            mul_crt_poly(prod, B_ij, omega_ij, LOG_R);
+            
+            poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            reduce_double_crt_poly(reduced, prod, LOG_R);
+            
+            add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
+            
+            free(prod);
+            free(reduced);
+        }
+        
+        printf("[Test]   B[%d]·ω[%d] (first 4 coeffs in CRT): %u %u %u %u\n",
+               attr_idx, i, temp_result[0], temp_result[1], temp_result[2], temp_result[3]);
+        
+        // Add to result[0] (first component of D-dimensional vector)
+        poly result_0 = poly_matrix_element(result, PARAM_D, 0, 0);
+        add_poly(result_0, result_0, temp_result, PARAM_N - 1);
+        
+        free(temp_result);
+    }
+    
+    printf("[Test] Final result = A*ω_A + Σ(B[i]*ω[i]) (first 4 coeffs in CRT): %u %u %u %u\n",
            result[0], result[1], result[2], result[3]);
     
     // Compare result with β
-    printf("\n[Compare] β vs A*ω_A:\n");
+    printf("\n[Compare] β vs A*ω_A + Σ(B[i]*ω[i]):\n");
     printf("[Compare] β (first 8 coeffs in CRT):\n");
     printf("  ");
     for (int i = 0; i < 8; i++) {
@@ -66,7 +110,7 @@ int main() {
     }
     printf("\n");
     
-    printf("[Compare] A*ω_A (first 8 coeffs in CRT):\n");
+    printf("[Compare] A*ω_A + Σ(B[i]*ω[i]) (first 8 coeffs in CRT):\n");
     printf("  ");
     for (int i = 0; i < 8; i++) {
         printf("%u ", result[i]);
@@ -90,7 +134,7 @@ int main() {
     }
     printf("\n");
     
-    printf("[Compare] A*ω_A (first 8 coeffs in COEFF):\n");
+    printf("[Compare] A*ω_A + Σ(B[i]*ω[i]) (first 8 coeffs in COEFF):\n");
     printf("  ");
     for (int i = 0; i < 8; i++) {
         printf("%u ", result_coeff[i]);
@@ -98,7 +142,7 @@ int main() {
     printf("\n");
     
     // Compute difference (error)
-    printf("\n[Error] Difference A*ω_A - β (first 8 coeffs in COEFF):\n");
+    printf("\n[Error] Difference [A*ω_A + Σ(B[i]*ω[i])] - β (first 8 coeffs in COEFF):\n");
     printf("  ");
     for (int i = 0; i < 8; i++) {
         int64_t diff = (int64_t)result_coeff[i] - (int64_t)beta_coeff[i];
