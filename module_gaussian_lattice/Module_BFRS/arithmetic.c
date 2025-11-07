@@ -1389,10 +1389,10 @@ void multiply_by_A(poly_matrix y, poly_matrix A, poly_matrix x)
 	// y <- y + x[:d]
 	for(int i = 0 ; i < PARAM_N * PARAM_D ; ++i)
 		{
-		y[i] += x[i];
+		y[i] = reduce_naive(y[i] + x[i]);
 		}
 	
-	freeze_poly(y, PARAM_N * PARAM_D - 1);
+	// freeze_poly(y, PARAM_N * PARAM_D - 1);  // Already reduced above
 	}
 
 /*
