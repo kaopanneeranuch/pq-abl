@@ -129,6 +129,10 @@ int main() {
     coeffs_representation(beta_coeff, LOG_R);
     coeffs_representation(result_coeff, LOG_R);
     
+    // CRITICAL: Reduce modulo q after CRT to COEFF conversion
+    freeze_poly(beta_coeff, PARAM_N - 1);
+    freeze_poly(result_coeff, PARAM_N - 1);
+    
     printf("\n[Compare] β (first 8 coeffs in COEFF):\n");
     printf("  ");
     for (int i = 0; i < 8; i++) {
