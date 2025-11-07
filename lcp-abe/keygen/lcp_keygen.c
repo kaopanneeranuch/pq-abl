@@ -219,8 +219,8 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
            target_0[0], target_0[1], target_0[2], target_0[3]);
     
-    // Convert target to CRT domain for sampling
-    matrix_crt_representation(target, PARAM_D, 1, LOG_R);
+    // NOTE: target is already in CRT domain (β and sum_term are both CRT)
+    // NO need to convert again - sample_pre_target expects CRT input
     
     // Use sample_pre_target to sample ωA
     // Note: sample_pre_target expects h_inv parameter, we can use identity polynomial
