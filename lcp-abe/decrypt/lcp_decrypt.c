@@ -58,21 +58,17 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // ========================================================================
     
     // ========================================================================
-    // CRITICAL: Encryption adds K_log in COEFFICIENT domain:
-    //   1. ct_key = e_key + β·s[0] (CRT domain)
-    //   2. coeffs_representation(ct_key)
-    //   3. ct_key[i] += (K_log[i] << 24)  <- K_log added in COEFF domain
-    //   4. crt_representation(ct_key)
-    //
-    // So decryption must:
-    //   1. Convert ct_key to COEFF domain FIRST
-    //   2. Compute decryption_term in COEFF domain
-    //   3. Subtract in COEFF domain to extract K_log
+    // PROPER LCP-ABE DECRYPTION (following paper specification):
+    // 
+    // Encryption: ct_key = e_key + β·s[0] + encode(K_log)  (in COEFF domain)
+    // Decryption: Compute ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j]) ≈ β·s[0]
+    //             Then: ct_key - (β·s[0]) ≈ e_key + encode(K_log)
+    //             Extract K_log from high 8 bits
     // ========================================================================
     
     poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // Copy ct_key and convert to COEFFICIENT domain immediately
+    // Copy ct_key and convert to COEFFICIENT domain
     memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
     printf("[Decrypt]   DEBUG: ct_key (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
@@ -81,39 +77,42 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: ct_key (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Compute the decryption term in COEFFICIENT domain: β·C0[0] + Σ(coeff[j]·ω[ρ(j)]·C[j])
+    // Compute the decryption term: ω_A · C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
     poly decryption_term = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // Step 1: Compute β · C0[0] in COEFFICIENT domain
-    printf("\n[Decrypt]   Step 1: Computing β·C0[0] in COEFFICIENT domain\n");
+    // Step 1: Compute ω_A · C0 (inner product over all M polynomials)
+    printf("\n[Decrypt]   Step 1: Computing ω_A · C0 (inner product)\n");
     
-    poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);  // First polynomial of C0 (CRT)
+    for (uint32_t j = 0; j < PARAM_M; j++) {
+        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
+        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
+        
+        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
+        
+        poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+        
+        // Convert to COEFF and add
+        coeffs_representation(prod_reduced, LOG_R);
+        add_poly(decryption_term, decryption_term, prod_reduced, PARAM_N - 1);
+        
+        free(prod);
+        free(prod_reduced);
+    }
     
-    double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-    mul_crt_poly(prod, mpk->beta, c0_0, LOG_R);  // Multiply in CRT domain
-    
-    poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-    reduce_double_crt_poly(prod_reduced, prod, LOG_R);
-    
-    // Convert β·C0[0] to COEFFICIENT domain (matching encryption's domain)
-    coeffs_representation(prod_reduced, LOG_R);
-    
-    memcpy(decryption_term, prod_reduced, PARAM_N * sizeof(scalar));
-    printf("[Decrypt]   β·C0[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Decrypt]   ω_A · C0 (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
     
-    free(prod);
-    free(prod_reduced);
-    
     // Step 2: Add Σ(coeff[j]·ω[ρ(j)]·C[j]) in COEFFICIENT domain
-    printf("\n[Decrypt]   Step 2: Computing Σ(coeff[j]·ω[ρ(j)]·C[j]) in COEFF domain\n");
+    printf("\n[Decrypt]   Step 2: Computing Σ(coeff[j]·ω[ρ(j)]·C[j])\n");
     
     for (uint32_t i = 0; i < n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
         uint32_t policy_attr_idx = ct_abe->policy.rho[i];
         printf("[Decrypt]   Processing policy row %d (attr idx %d, coeff=%u)\n", 
                i, policy_attr_idx, coefficients[i]);
         
-        // Find corresponding omega_i in user's key by matching attribute index
+        // Find corresponding omega_i in user's key
         int omega_idx = -1;
         for (uint32_t j = 0; j < usk->attr_set.count; j++) {
             if (usk->attr_set.attrs[j].index == policy_attr_idx) {
@@ -130,8 +129,8 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             return -1;
         }
         
-        // Compute ω[ρ(i)]·C[i] in CRT, then convert to COEFF
-        poly temp_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+        // Compute ω[ρ(i)]·C[i] as inner product
+        poly temp_sum = (poly)calloc(PARAM_N, sizeof(scalar));
         
         for (uint32_t j = 0; j < PARAM_M; j++) {
             poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
@@ -143,21 +142,21 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
             reduce_double_crt_poly(prod_reduced, prod, LOG_R);
             
-            add_poly(temp_crt, temp_crt, prod_reduced, PARAM_N - 1);
+            // Convert to COEFF and add
+            coeffs_representation(prod_reduced, LOG_R);
+            add_poly(temp_sum, temp_sum, prod_reduced, PARAM_N - 1);
+            
             free(prod);
             free(prod_reduced);
         }
         
-        // Convert ω·C to coefficient domain
-        coeffs_representation(temp_crt, LOG_R);
-        
         // Multiply by reconstruction coefficient and add to decryption_term
         for (uint32_t k = 0; k < PARAM_N; k++) {
-            scalar term = ((uint64_t)temp_crt[k] * coefficients[i]) % PARAM_Q;
+            scalar term = ((uint64_t)temp_sum[k] * coefficients[i]) % PARAM_Q;
             decryption_term[k] = (decryption_term[k] + term) % PARAM_Q;
         }
         
-        free(temp_crt);
+        free(temp_sum);
     }
     
     printf("[Decrypt]   decryption_term (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
@@ -167,8 +166,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("\n[Decrypt]   Step 3: Subtracting to extract K_log\n");
     
     for (uint32_t i = 0; i < PARAM_N; i++) {
-        // recovered = ct_key - decryption_term (mod Q)
-        // Both are already in COEFF domain
         recovered[i] = (recovered[i] + PARAM_Q - decryption_term[i]) % PARAM_Q;
     }
     
@@ -177,7 +174,7 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   In HEX: [0]=0x%08x, [1]=0x%08x, [2]=0x%08x, [3]=0x%08x\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Extract K_log from high 8 bits
+    // Extract K_log from high 8 bits (K_log is in bits [31:24])
     printf("[Decrypt]   Extracting K_log from high 8 bits (>> 24):\n");
     printf("[Decrypt]   ");
     for (int i = 0; i < 8; i++) {
@@ -185,12 +182,11 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     }
     printf("\n");
     
-    // Use the standard extraction
+    // Extract full K_log
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         key_out[i] = (uint8_t)((recovered[i] >> 24) & 0xFF);
     }
     
-    free(decryption_term);
     free(recovered);
     
     printf("[Decrypt] K_log recovered successfully (first 16 bytes): ");
