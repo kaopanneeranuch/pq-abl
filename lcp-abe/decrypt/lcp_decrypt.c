@@ -178,20 +178,22 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   In HEX: [0]=0x%08x, [1]=0x%08x, [2]=0x%08x, [3]=0x%08x\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Extract K_log by rounding: K_log[i] = round(recovered[i] * 256 / Q)
-    // Use (recovered[i] * 256 + Q/2) / Q for rounding
-    printf("[Decrypt]   Extracting K_log using rounding (recovered * 256 / Q):\n");
+    // Extract K_log by rounding to nearest byte value
+    // Decoding inverts the encoding: K_log[i] = round(recovered[i] / 2^22)
+    printf("[Decrypt]   Extracting K_log using rounding (recovered >> %d):\n", LOG_Q - 8);
     printf("[Decrypt]   ");
+    const uint32_t shift = LOG_Q - 8;  // 30 - 8 = 22 bits
     for (int i = 0; i < 8; i++) {
-        uint64_t scaled = ((uint64_t)recovered[i] * 256 + PARAM_Q/2) / PARAM_Q;
-        printf("%02x ", (uint8_t)(scaled & 0xFF));
+        // Round to nearest: add 2^(shift-1) before right-shifting
+        uint64_t rounded = ((uint64_t)recovered[i] + (1ULL << (shift - 1))) >> shift;
+        printf("%02x ", (uint8_t)(rounded & 0xFF));
     }
     printf("\n");
     
     // Extract full K_log using proper rounding
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        uint64_t scaled = ((uint64_t)recovered[i] * 256 + PARAM_Q/2) / PARAM_Q;
-        key_out[i] = (uint8_t)(scaled & 0xFF);
+        uint64_t rounded = ((uint64_t)recovered[i] + (1ULL << (shift - 1))) >> shift;
+        key_out[i] = (uint8_t)(rounded & 0xFF);
     }
     
     free(recovered);
