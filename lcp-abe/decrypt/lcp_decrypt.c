@@ -103,8 +103,8 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         // Get the attribute index for this policy row
         printf("[Decrypt]   DEBUG: Accessing ct_abe->policy.rho[%d]\n", i);
         uint32_t policy_attr_idx = ct_abe->policy.rho[i];
-        printf("[Decrypt]   Policy row %d → attribute index %d (coeff=%.6f)\n", 
-               i, policy_attr_idx, (double)coefficients[i] / PARAM_Q);
+        printf("[Decrypt]   Policy row %d → attribute index %d (coeff=%u)\n", 
+               i, policy_attr_idx, coefficients[i]);
         
         // Find corresponding omega_i in user's key by matching attribute index
         int omega_idx = -1;
