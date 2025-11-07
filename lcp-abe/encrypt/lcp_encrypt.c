@@ -398,12 +398,22 @@ int lcp_abe_encrypt(const uint8_t key[AES_KEY_SIZE],
     free(reduced);
     printf("[Encrypt]   DEBUG: Buffers freed\n");
     
+    // **CRITICAL**: Convert ct_key from CRT to coefficient representation BEFORE encoding K_log
+    printf("[Encrypt]   DEBUG: Converting ct_key from CRT to coefficient representation\n");
+    coeffs_representation(ct_abe->ct_key, LOG_R);
+    printf("[Encrypt]   DEBUG: ct_key now in coefficient domain\n");
+    
     // Encode K_log into polynomial (pack bytes into coefficients)
-    printf("[Encrypt]   DEBUG: Encoding K_log into ct_key\n");
+    printf("[Encrypt]   DEBUG: Encoding K_log into ct_key (now in coefficient domain)\n");
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         ct_abe->ct_key[i] = (ct_abe->ct_key[i] + key[i]) % PARAM_Q;
     }
-    printf("[Encrypt]   DEBUG: K_log encoded\n");
+    printf("[Encrypt]   DEBUG: K_log encoded successfully\n");
+    
+    // **CRITICAL**: Convert ct_key BACK to CRT for storage (since C0, C[i] are in CRT)
+    printf("[Encrypt]   DEBUG: Converting ct_key back to CRT representation for storage\n");
+    crt_representation(ct_abe->ct_key, LOG_R);
+    printf("[Encrypt]   DEBUG: ct_key back in CRT domain\n");
     
     printf("[Encrypt]   DEBUG: Freeing e_key\n");
     free(e_key);
