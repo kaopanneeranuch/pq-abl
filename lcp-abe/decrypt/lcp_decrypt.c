@@ -88,6 +88,23 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: After β·C0[0] (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
     
+    // EXPERIMENTAL: Try using ONLY β·C0[0] without the Σ terms
+    printf("[Decrypt]   EXPERIMENTAL: Testing decryption with ONLY β·C0[0]...\n");
+    poly test_recovered = (poly)calloc(PARAM_N, sizeof(scalar));
+    memcpy(test_recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
+    
+    for (uint32_t i = 0; i < PARAM_N; i++) {
+        test_recovered[i] = (test_recovered[i] + PARAM_Q - decryption_term[i]) % PARAM_Q;
+    }
+    coeffs_representation(test_recovered, LOG_R);
+    
+    printf("[Decrypt]   Test (only β·C0[0]): coeffs=[0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           test_recovered[0], test_recovered[1], test_recovered[2], test_recovered[3]);
+    printf("[Decrypt]   Test extraction: [0]=0x%02x, [1]=0x%02x, [2]=0x%02x, [3]=0x%02x\n",
+           (uint8_t)(test_recovered[0] >> 24), (uint8_t)(test_recovered[1] >> 24),
+           (uint8_t)(test_recovered[2] >> 24), (uint8_t)(test_recovered[3] >> 24));
+    free(test_recovered);
+    
     // Step 2: Add Σ(coeff[j]·ω[ρ(j)]·C[j]) for policy-matching attributes
     printf("[Decrypt]   Computing Σ(coeff[j]·ω[ρ(j)]·C[j])...\n");
     printf("[Decrypt]   DEBUG: n_coeffs=%d, ct_abe->policy.matrix_rows=%d\n", 
