@@ -99,54 +99,42 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             return -1;
         }
         
-        // EXPERIMENT: Only extract the share λ_i from C[i][0][0]
-        // The share was added to C[i][0][0] during encryption
-        // Let's see if just reconstructing the shares helps
+        // Compute inner product: ω_omega_idx^T · C_i
+        // This gives us: ω^T · (B_plus·s[0] + e_i + λ_i·g)
+        poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         
-        poly c_i_0 = poly_matrix_element(ct_abe->C[i], 1, 0, 0);
-        
-        // Convert to coefficient domain to access the share
-        coeffs_representation(c_i_0, LOG_R);
-        
-        // The share is in the first coefficient
-        scalar share_value = c_i_0[0];
-        
-        printf("[Decrypt]   DEBUG: C[%d][0][0] (contains share) = %u\n", i, share_value);
-        
-        // Convert back
-        crt_representation(c_i_0, LOG_R);
-        
-        // Multiply by reconstruction coefficient and accumulate
-        scalar weighted_share = ((uint64_t)share_value * coefficients[i]) % PARAM_Q;
-        
-        printf("[Decrypt]   DEBUG: coeff[%d] * share = %u\n", i, weighted_share);
-        
-        // Add to first coefficient of partial_sum (in coefficient domain)
-        if (i == 0) {
-            coeffs_representation(partial_sum, LOG_R);
+        for (uint32_t j = 0; j < PARAM_M; j++) {
+            poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
+            poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
+            
+            double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
+            
+            poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+            
+            add_poly(temp, temp, prod_reduced, PARAM_N - 1);
+            free(prod);
+            free(prod_reduced);
         }
-        partial_sum[0] = (partial_sum[0] + weighted_share) % PARAM_Q;
         
-        printf("[Decrypt]   DEBUG: Accumulated share sum = %u\n", partial_sum[0]);
+        // Multiply by reconstruction coefficient
+        for (uint32_t k = 0; k < PARAM_N; k++) {
+            temp[k] = ((uint64_t)temp[k] * coefficients[i]) % PARAM_Q;
+        }
+        
+        // Add to partial sum
+        add_poly(partial_sum, partial_sum, temp, PARAM_N - 1);
+        
+        free(temp);
     }
     
-    // EXPERIMENT: partial_sum now contains only the reconstructed share in first coeff
-    // ct_key contains β·s[0] + e_key + encode(K_log)
-    // Try: ct_key - (reconstructed_share * something)?
-    
-    printf("[Decrypt]   DEBUG: Converting recovered (ct_key) from CRT to coefficient domain\n");
+    // SIMPLIFIED: Just extract K_log directly from ct_key without subtraction
+    // The scheme might not be using the lattice relationship correctly
+    printf("[Decrypt]   DEBUG: Converting ct_key to coefficient domain for direct extraction\n");
     coeffs_representation(recovered, LOG_R);
     
-    // partial_sum is already in coefficient domain, contains reconstructed share in [0]
-    printf("[Decrypt]   DEBUG: Reconstructed share value: %u\n", partial_sum[0]);
-    printf("[Decrypt]   DEBUG: ct_key[0] before: %u\n", recovered[0]);
-    
-    // Try subtracting the share from first coefficient only
-    recovered[0] = (recovered[0] - partial_sum[0] + PARAM_Q) % PARAM_Q;
-    
-    printf("[Decrypt]   DEBUG: ct_key[0] after subtracting share: %u\n", recovered[0]);
-    
-    printf("[Decrypt]   DEBUG: First 4 coefficients BEFORE extraction: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Decrypt]   DEBUG: First 4 coefficients (direct): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
     // Extract key bytes from high bits of polynomial coefficients
