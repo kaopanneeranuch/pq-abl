@@ -480,6 +480,8 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     // Allocate ciphertext components
     ct_abe_template->C0 = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     ct_abe_template->C = (poly_matrix*)calloc(n_rows, sizeof(poly_matrix));
+    ct_abe_template->n_components = n_rows;  // CRITICAL: Set n_components
+    
     if (!ct_abe_template->C0 || !ct_abe_template->C) {
         fprintf(stderr, "[Batch Init] ERROR: Failed to allocate C0/C\n");
         return -1;

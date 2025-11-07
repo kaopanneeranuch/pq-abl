@@ -62,9 +62,16 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // CRITICAL FIX: Map policy rows to user's omega vectors by attribute index
     // Policy row i corresponds to attribute rho[i], must match with user's omega[j]
     printf("[Decrypt]   Building attribute index mapping...\n");
+    printf("[Decrypt]   DEBUG: n_coeffs=%d, ct_abe->policy.matrix_rows=%d\n", 
+           n_coeffs, ct_abe->policy.matrix_rows);
+    printf("[Decrypt]   DEBUG: ct_abe->C=%p, ct_abe->C0=%p, ct_abe->ct_key=%p\n",
+           (void*)ct_abe->C, (void*)ct_abe->C0, (void*)ct_abe->ct_key);
     
     for (uint32_t i = 0; i < n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
+        printf("[Decrypt]   DEBUG: Loop iteration i=%d\n", i);
+        
         // Get the attribute index for this policy row
+        printf("[Decrypt]   DEBUG: Accessing ct_abe->policy.rho[%d]\n", i);
         uint32_t policy_attr_idx = ct_abe->policy.rho[i];
         printf("[Decrypt]   Policy row %d → attribute index %d (coeff=%.6f)\n", 
                i, policy_attr_idx, (double)coefficients[i] / PARAM_Q);
@@ -89,14 +96,34 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         }
         
         // For each matching attribute, compute contribution using correct omega
+        printf("[Decrypt]   DEBUG: Allocating temp poly\n");
         poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!temp) {
+            fprintf(stderr, "[Decrypt] ERROR: Failed to allocate temp\n");
+            free(partial_sum);
+            free(recovered);
+            return -1;
+        }
         
         // Compute inner product: ω_omega_idx^T · C_i
         // C_i is m×1 column vector, ω is m×1 column vector
         // Loop over all m=PARAM_M components
+        printf("[Decrypt]   DEBUG: Computing inner product for %d components (PARAM_M=%d)\n", PARAM_M, PARAM_M);
+        printf("[Decrypt]   DEBUG: Checking ct_abe->C[%d]=%p\n", i, (void*)ct_abe->C[i]);
+        
         for (uint32_t j = 0; j < PARAM_M; j++) {
+            if (j == 0) {
+                printf("[Decrypt]   DEBUG: Loop j=%d, accessing omega and C elements\n", j);
+            }
+            
             // Use omega_idx (user's index) for omega, i (policy row) for C
             poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
+            
+            if (j == 0) {
+                printf("[Decrypt]   DEBUG: omega_ij=%p, about to access ct_abe->C[%d]\n", 
+                       (void*)omega_ij, i);
+            }
+            
             poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
             
             // Multiply in CRT domain (produces 2*PARAM_N result)
