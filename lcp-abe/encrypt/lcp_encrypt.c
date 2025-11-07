@@ -792,10 +792,24 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
     for (uint32_t i = 0; i < batch->n_logs; i++) {
         const EncryptedLogObject *log = &batch->logs[i];
         
-        // Create filename for this CT_obj
+        // Generate unique ID from log metadata (timestamp + user + resource)
+        char unique_key[256];
+        snprintf(unique_key, sizeof(unique_key), "%s%s%s",
+                 log->metadata.timestamp,
+                 log->metadata.user_id,
+                 log->metadata.resource_id);
+        
+        // Simple hash for filename (FNV-1a variant)
+        uint32_t hash = 2166136261u;
+        for (const char *p = unique_key; *p; p++) {
+            hash ^= (uint8_t)*p;
+            hash *= 16777619u;
+        }
+        
+        // Create filename for this CT_obj (epoch + unique hash)
         char filename[512];
-        snprintf(filename, sizeof(filename), "%s/ctobj_epoch%lu_log%u.bin",
-                 output_dir, batch->epoch_id, i + 1);
+        snprintf(filename, sizeof(filename), "%s/ctobj_epoch%lu_%08x.bin",
+                 output_dir, batch->epoch_id, hash);
         
         FILE *fp = fopen(filename, "wb");
         if (!fp) {
@@ -843,8 +857,8 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
         
         // Save hash to separate text file
         char hash_filename[512];
-        snprintf(hash_filename, sizeof(hash_filename), "%s/ctobj_epoch%lu_log%u_hash.txt",
-                 output_dir, batch->epoch_id, i + 1);
+        snprintf(hash_filename, sizeof(hash_filename), "%s/ctobj_epoch%lu_%08x_hash.txt",
+                 output_dir, batch->epoch_id, hash);
         
         fp = fopen(hash_filename, "w");
         if (fp) {
