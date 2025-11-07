@@ -40,32 +40,58 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     }
     
     // ========================================================================
-    // Decryption Algorithm:
-    // For the new scheme with B+, B-, β structure:
-    // 1. Compute partial decryption using ω_i vectors
-    // 2. Use ω_A and reconstruction coefficients
-    // 3. Recover K_log from ct_key using β relationship
+    // Decryption Algorithm (Proper Lattice-Based):
+    // 
+    // Given:
+    //   ct_key = β·s[0] + e_key + encode(K_log)
+    //   C0[i] = s[i] + e0[i] for i < PARAM_D
+    //   C[j] = B_plus[ρ(j)]·s[0] + e_j + λ_j·g
+    //   A·ω_A ≈ β - Σ(B_plus[user_attrs]·ω[user_attrs])
+    //
+    // Decryption computes:
+    //   ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
+    //   ≈ ω_A·s + Σ(coeff[j]·ω[ρ(j)]·B_plus[ρ(j)]·s[0])
+    //   ≈ β·s[0]  (using the trapdoor relationship)
+    //
+    // Then: ct_key - (β·s[0]) ≈ e_key + encode(K_log)
+    // Extract K_log from high bits (errors don't affect high 8 bits)
     // ========================================================================
-    
-    // Simplified decryption (basic implementation)
-    // TODO: Full decryption needs proper lattice trapdoor inversion
-    // For now, use a simplified approach for testing
     
     poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
     
     // Copy ct_key as base
     memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
     
-    printf("[Decrypt]   DEBUG: ct_key (recovered initial, CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Decrypt]   DEBUG: ct_key (initial, CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Compute sum of contributions from user's attributes
-    poly partial_sum = (poly)calloc(PARAM_N, sizeof(scalar));
+    // Compute the decryption term: ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
+    poly decryption_term = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // SIMPLIFIED DECRYPTION: Only use C[i] components (shares are embedded there)
-    // Skip ω_A·C0 for now to test if that's the issue
+    // Step 1: Compute ω_A · C0
+    // Since C0[i] = s[i] + e0[i] for i < PARAM_D, and ω_A is m-dimensional,
+    // we compute the full inner product
+    printf("[Decrypt]   Computing ω_A · C0 (to get ω_A·s term)...\n");
+    for (uint32_t j = 0; j < PARAM_M; j++) {
+        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
+        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
+        
+        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
+        
+        poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+        
+        add_poly(decryption_term, decryption_term, prod_reduced, PARAM_N - 1);
+        free(prod);
+        free(prod_reduced);
+    }
     
-    printf("[Decrypt]   Building attribute index mapping...\n");
+    printf("[Decrypt]   DEBUG: After ω_A·C0 (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
+    
+    // Step 2: Add Σ(coeff[j]·ω[ρ(j)]·C[j]) for policy-matching attributes
+    printf("[Decrypt]   Computing Σ(coeff[j]·ω[ρ(j)]·C[j])...\n");
     printf("[Decrypt]   DEBUG: n_coeffs=%d, ct_abe->policy.matrix_rows=%d\n", 
            n_coeffs, ct_abe->policy.matrix_rows);
     printf("[Decrypt]   DEBUG: ct_abe->C=%p, ct_abe->C0=%p, ct_abe->ct_key=%p\n",
@@ -94,13 +120,12 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         if (omega_idx == -1) {
             fprintf(stderr, "[Decrypt] ERROR: Policy requires attr %d but user doesn't have it!\n", 
                     policy_attr_idx);
-            free(partial_sum);
+            free(decryption_term);
             free(recovered);
             return -1;
         }
         
-        // Compute inner product: ω_omega_idx^T · C_i
-        // This gives us: ω^T · (B_plus·s[0] + e_i + λ_i·g)
+        // Compute ω[ρ(i)]·C[i] (full m-dimensional inner product)
         poly temp = (poly)calloc(PARAM_N, sizeof(scalar));
         
         for (uint32_t j = 0; j < PARAM_M; j++) {
@@ -123,21 +148,29 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             temp[k] = ((uint64_t)temp[k] * coefficients[i]) % PARAM_Q;
         }
         
-        // Add to partial sum
-        add_poly(partial_sum, partial_sum, temp, PARAM_N - 1);
-        
+        // Add to decryption_term
+        add_poly(decryption_term, decryption_term, temp, PARAM_N - 1);
         free(temp);
     }
     
-    // SIMPLIFIED: Just extract K_log directly from ct_key without subtraction
-    // The scheme might not be using the lattice relationship correctly
-    printf("[Decrypt]   DEBUG: Converting ct_key to coefficient domain for direct extraction\n");
+    printf("[Decrypt]   DEBUG: Full decryption_term (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+           decryption_term[0], decryption_term[1], decryption_term[2], decryption_term[3]);
+    
+    // Step 3: Subtract decryption_term from ct_key to recover encode(K_log) + small_error
+    printf("[Decrypt]   Subtracting decryption_term from ct_key...\n");
+    for (uint32_t i = 0; i < PARAM_N; i++) {
+        // recovered = ct_key - decryption_term (mod Q)
+        recovered[i] = (recovered[i] + PARAM_Q - decryption_term[i]) % PARAM_Q;
+    }
+    
+    printf("[Decrypt]   Converting recovered to coefficient domain...\n");
     coeffs_representation(recovered, LOG_R);
     
-    printf("[Decrypt]   DEBUG: First 4 coefficients (direct): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Decrypt]   DEBUG: First 4 recovered coefficients: [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    // Extract key bytes from high bits of polynomial coefficients
+    // Step 4: Extract K_log from high bits of recovered polynomial
+    printf("[Decrypt]   Extracting K_log from high bits...\n");
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         // Extract from high 8 bits (matching encryption's << 24)
         key_out[i] = (uint8_t)((recovered[i] >> 24) & 0xFF);
@@ -146,7 +179,7 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   DEBUG: First 4 extracted K_log bytes: [0]=0x%02x, [1]=0x%02x, [2]=0x%02x, [3]=0x%02x\n",
            key_out[0], key_out[1], key_out[2], key_out[3]);
     
-    free(partial_sum);
+    free(decryption_term);
     free(recovered);
     
     printf("[Decrypt] K_log recovered successfully (first 16 bytes): ");
