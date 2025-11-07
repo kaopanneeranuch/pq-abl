@@ -68,13 +68,10 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     
     poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // Copy ct_key and convert to COEFFICIENT domain
+    // Copy ct_key - it's already in COEFFICIENT domain from encryption
+    // (encryption encodes K_log in COEFF domain and keeps it there)
     memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
-    printf("[Decrypt]   DEBUG: ct_key (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-           recovered[0], recovered[1], recovered[2], recovered[3]);
-    
-    coeffs_representation(recovered, LOG_R);
-    printf("[Decrypt]   DEBUG: ct_key (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Decrypt]   DEBUG: ct_key (already COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
     // Compute the decryption term: ω_A · C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])

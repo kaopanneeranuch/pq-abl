@@ -356,10 +356,11 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     printf("[Batch Key] DEBUG: Encoded values in HEX: [0]=0x%08x, [1]=0x%08x, [2]=0x%08x, [3]=0x%08x\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
-    // Convert back to CRT
-    crt_representation(ct_abe->ct_key, LOG_R);
+    // DO NOT convert back to CRT - ct_key must stay in COEFFICIENT domain
+    // because decryption expects it in coefficient domain
+    // (decryption converts from CRT to COEFF, but we're already in COEFF after encoding)
     
-    printf("[Batch Key] DEBUG: ct_key after CRT conversion (first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    printf("[Batch Key] DEBUG: ct_key stays in COEFF domain (first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
     free(e_key);
