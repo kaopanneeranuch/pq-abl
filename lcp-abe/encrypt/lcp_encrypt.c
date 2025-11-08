@@ -384,14 +384,22 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     
     // Encode K_log into high-order bits using bit-shift scaling
     // Scale by 2^(PARAM_K - 8) to place K_log in upper 8 bits
-    // This maximizes noise tolerance for LWE decryption
+    // Center the LWE component before embedding to avoid mod-q wraparound
     const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
+    const int64_t Q_half = PARAM_Q / 2;
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        // Encode K_log in upper bits: multiply by 2^shift
-        uint64_t encoded = (uint64_t)key[i] << shift;
-        // Add to ct_key (LWE noise term) and reduce mod Q
-        uint64_t sum = (uint64_t)ct_abe->ct_key[i] + encoded;
-        ct_abe->ct_key[i] = (uint32_t)(sum % PARAM_Q);
+        int64_t base = (int64_t)ct_abe->ct_key[i];
+        if (base > Q_half) {
+            base -= PARAM_Q;
+        }
+
+        int64_t encoded = ((int64_t)key[i]) << shift;
+        int64_t sum = base + encoded;
+        int64_t sum_mod = sum % (int64_t)PARAM_Q;
+        if (sum_mod < 0) {
+            sum_mod += PARAM_Q;
+        }
+        ct_abe->ct_key[i] = (uint32_t)sum_mod;
     }
     
     printf("[Batch Key] DEBUG: ct_key after K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
