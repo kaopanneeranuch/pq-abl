@@ -21,33 +21,71 @@ int main(void) {
         fprintf(stderr,"Failed to load MPK/MSK\n"); return 1;
     }
 
-    /* Build attribute set */
-    AttributeSet attrs;
-    attribute_set_init(&attrs);
-    
-    // Use the same hash function as policy parsing to compute indices
-    // This ensures attribute indices match between encryption and decryption
-    Attribute a1;
-    Attribute a2;
-    
-    // Hash "user_role:admin" to get consistent index
-    attribute_init(&a1, "user_role:admin", attr_name_to_index("user_role:admin"));
-    // Hash "team:storage-team" to get consistent index  
-    attribute_init(&a2, "team:storage-team", attr_name_to_index("team:storage-team"));
-    
-    attribute_set_add(&attrs, &a1);
-    attribute_set_add(&attrs, &a2);
-    
-    printf("[KeyGen] User attributes:\n");
-    printf("  - %s (index %u)\n", a1.name, a1.index);
-    printf("  - %s (index %u)\n", a2.name, a2.index);
+    /* Build attribute sets for the test coverage */
+    typedef struct {
+        const char *description;
+        const char *filename;
+        const char *attr_names[2];
+        size_t attr_count;
+    } KeygenRequest;
 
-    UserSecretKey sk;
-    usk_init(&sk, 2);
-    if (lcp_keygen(&mpk, &msk, &attrs, &sk) != 0) { // lcp_keygen returns 0 on success
-        fprintf(stderr,"KeyGen failed\n"); return 1;
+    const KeygenRequest requests[] = {
+        {
+            .filename = "keys/SK_admin_storage.bin",
+            .attr_names = { "user_role:admin", "team:storage-team" },
+            .attr_count = 2
+        },
+        {
+            .filename = "keys/SK_admin_only.bin",
+            .attr_names = { "user_role:admin", NULL },
+            .attr_count = 1
+        },
+        {
+            .filename = "keys/SK_app_team.bin",
+            .attr_names = { "team:app-team", NULL },
+            .attr_count = 1
+        }
+    };
+
+    for (size_t r = 0; r < sizeof(requests) / sizeof(requests[0]); r++) {
+        const KeygenRequest *req = &requests[r];
+        AttributeSet attrs;
+        attribute_set_init(&attrs);
+
+        printf("[KeyGen] Generating key for %s\n", req->description);
+
+        for (size_t i = 0; i < req->attr_count; i++) {
+            const char *name = req->attr_names[i];
+            if (!name) {
+                continue;
+            }
+
+            Attribute attr;
+            uint32_t index = attr_name_to_index(name);
+            attribute_init(&attr, name, index);
+            attribute_set_add(&attrs, &attr);
+            printf("  - %s (index %u)\n", attr.name, attr.index);
+        }
+
+        UserSecretKey sk;
+        usk_init(&sk, (uint32_t)attrs.count);
+
+        if (lcp_keygen(&mpk, &msk, &attrs, &sk) != 0) {
+            fprintf(stderr, "KeyGen failed for %s\n", req->description);
+            usk_free(&sk);
+            return 1;
+        }
+
+        if (lcp_save_usk(&sk, req->filename) != 0) {
+            fprintf(stderr, "Failed to write %s\n", req->filename);
+            usk_free(&sk);
+            return 1;
+        }
+
+        printf("  Saved %s\n", req->filename);
+        usk_free(&sk);
     }
-    lcp_save_usk(&sk, "keys/SK_admin_storage.bin");
-    printf("Wrote keys/SK_admin_storage.bin\n");
+
+    printf("All requested user secret keys generated.\n");
     return 0;
 }
