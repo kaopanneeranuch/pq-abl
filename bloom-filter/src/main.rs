@@ -1,19 +1,54 @@
 use bloomfilter::Bloom; // import bloom filter as Bloom ?
+//
+use std::{
+    fs::{ File, OpenOptions},
+    path::Path,
+    io::{prelude::*, BufReader}
+    };
+    
+    
+fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
+    let file = File::open(filename).expect("no such file");
+    let buf = BufReader::new(file);
+    buf.lines()
+        .map(|l| l.expect("Could not parse line"))
+        .collect()
+}
 fn main() {
     let num_items = 100;
     let fp_rate = 0.001;
     let seed = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 
         17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
     let mut bloom = Bloom::new_for_fp_rate_with_seed(num_items, fp_rate, &seed).unwrap(); // we can
+    let buffer = lines_from_file("./root_buffer"); // read line
+    for buff in buffer {
+        bloom.set(&buff);   // insert 10 in the bloom filter
+    }
+    // open write appedn file
+    let mut verified_root = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("./verified_root")
+        .unwrap();
+    let verify = lines_from_file("./root_verify"); // read line
+    for ver in verify {
+       if bloom.check(&ver){
+            if let Err(e) = writeln!(verified_root, "{}", ver){
+                eprintln!("Counldn't write veried rootproof to file: {}", e)
+            }
+        };
+    }
+    
+    // debug
+    //
     // save stage now since bloom filter is set seed.
-    bloom.set(&"b2de55a3620d6d88bf5d7e561b247260449978c70b99ced7a1eb3c7288dba086");   // insert 10 in the bloom filter
     // bloom.set(&"1");
-    println!("{}", (bloom.check(&"b2de55a3620d6d88bf5d7e561b247260449978c70b99ced7a1eb3c7288dba086")));
-    println!("{}", (bloom.check(&"abcedfg")));
-    println!("{}", (bloom.is_empty()));
-    println!("{}", (bloom.number_of_hash_functions()));
-    println!("{:?}", (bloom.to_bytes()));
-    println!("{:?}", (bloom.into_bytes()));
+    // println!("{}", (bloom.check(&"")));
+    // println!("{}", (bloom.check(&"abcedfg")));
+    // println!("{}", (bloom.is_empty()));
+    // println!("{}", (bloom.number_of_hash_functions()));
+    // println!("{:?}", (bloom.to_bytes()));
+    // println!("{:?}", (bloom.into_bytes()));
     // println!("{:?}", bloom);
 
 }
