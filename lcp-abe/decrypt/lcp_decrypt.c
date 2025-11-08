@@ -386,16 +386,53 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
         fclose(fp);
         return -1;
     }
-    
+
+    // Sanity-check ct_len
+    if (log->ct_sym.ct_len == 0 || log->ct_sym.ct_len > 10 * 1024 * 1024) {
+        fprintf(stderr, "[Load] Error: suspicious ct_len=%u\n", log->ct_sym.ct_len);
+        fclose(fp);
+        return -1;
+    }
+
     log->ct_sym.ciphertext = (uint8_t*)malloc(log->ct_sym.ct_len);
-    fread(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
-    fread(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
-    fread(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
+    if (!log->ct_sym.ciphertext) {
+        fprintf(stderr, "[Load] Error: Failed to allocate ciphertext buffer (len=%u)\n", log->ct_sym.ct_len);
+        fclose(fp);
+        return -1;
+    }
+    if (fread(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp) != 1) {
+        fprintf(stderr, "[Load] Error: Failed to read ciphertext data\n");
+        free(log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
+    if (fread(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp) != 1) {
+        fprintf(stderr, "[Load] Error: Failed to read nonce\n");
+        free(log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
+    if (fread(log->ct_sym.tag, AES_TAG_SIZE, 1, fp) != 1) {
+        fprintf(stderr, "[Load] Error: Failed to read tag\n");
+        free(log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
     printf("[Load] Loaded CT_sym (size: %u bytes)\n", log->ct_sym.ct_len);
     
     // Read ABE ciphertext (CT_ABE)
-    fread(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
-    fread(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp);
+    if (fread(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp) != 1) {
+        fprintf(stderr, "[Load] Error: Failed to read policy expression\n");
+        free(log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
+    if (fread(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp) != 1) {
+        fprintf(stderr, "[Load] Error: Failed to read n_components\n");
+        free(log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
     printf("[Load] Loaded CT_ABE policy: '%s' (%u components)\n", 
            log->ct_abe.policy.expression, log->ct_abe.n_components);
     
@@ -405,26 +442,109 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     // Allocate and read C0
     size_t c0_size = PARAM_M * PARAM_N;
     log->ct_abe.C0 = (poly_matrix)malloc(c0_size * sizeof(scalar));
-    fread(log->ct_abe.C0, sizeof(scalar), c0_size, fp);
+    if (!log->ct_abe.C0) {
+        fprintf(stderr, "[Load] Error: Failed to allocate C0 buffer\n");
+        free(log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
+    if (fread(log->ct_abe.C0, sizeof(scalar), c0_size, fp) != c0_size) {
+        fprintf(stderr, "[Load] Error: Failed to read C0\n");
+        free(log->ct_sym.ciphertext);
+        free(log->ct_abe.C0);
+        fclose(fp);
+        return -1;
+    }
     
     // Allocate and read C[i] components
     log->ct_abe.C = (poly_matrix*)malloc(log->ct_abe.n_components * sizeof(poly_matrix));
+    if (!log->ct_abe.C) {
+        fprintf(stderr, "[Load] Error: Failed to allocate C array (n_components=%u)\n", log->ct_abe.n_components);
+        free(log->ct_sym.ciphertext);
+        free(log->ct_abe.C0);
+        fclose(fp);
+        return -1;
+    }
     for (uint32_t j = 0; j < log->ct_abe.n_components; j++) {
         log->ct_abe.C[j] = (poly_matrix)malloc(c0_size * sizeof(scalar));
-        fread(log->ct_abe.C[j], sizeof(scalar), c0_size, fp);
+        if (!log->ct_abe.C[j]) {
+            fprintf(stderr, "[Load] Error: Failed to allocate C[%u]\n", j);
+            for (uint32_t k = 0; k < j; k++) free(log->ct_abe.C[k]);
+            free(log->ct_abe.C);
+            free(log->ct_sym.ciphertext);
+            free(log->ct_abe.C0);
+            fclose(fp);
+            return -1;
+        }
+        if (fread(log->ct_abe.C[j], sizeof(scalar), c0_size, fp) != c0_size) {
+            fprintf(stderr, "[Load] Error: Failed to read C[%u]\n", j);
+            for (uint32_t k = 0; k <= j; k++) free(log->ct_abe.C[k]);
+            free(log->ct_abe.C);
+            free(log->ct_sym.ciphertext);
+            free(log->ct_abe.C0);
+            fclose(fp);
+            return -1;
+        }
     }
     
     // Allocate and read ct_key
     log->ct_abe.ct_key = (poly)malloc(PARAM_N * sizeof(scalar));
-    fread(log->ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
+    if (!log->ct_abe.ct_key) {
+        fprintf(stderr, "[Load] Error: Failed to allocate ct_key\n");
+        for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
+        free(log->ct_abe.C);
+        free(log->ct_sym.ciphertext);
+        free(log->ct_abe.C0);
+        fclose(fp);
+        return -1;
+    }
+    if (fread(log->ct_abe.ct_key, sizeof(scalar), PARAM_N, fp) != PARAM_N) {
+        fprintf(stderr, "[Load] Error: Failed to read ct_key\n");
+        free(log->ct_abe.ct_key);
+        for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
+        free(log->ct_abe.C);
+        free(log->ct_sym.ciphertext);
+        free(log->ct_abe.C0);
+        fclose(fp);
+        return -1;
+    }
     
     // Read rho
     uint32_t matrix_rows;
-    fread(&matrix_rows, sizeof(uint32_t), 1, fp);
+    if (fread(&matrix_rows, sizeof(uint32_t), 1, fp) != 1) {
+        fprintf(stderr, "[Load] Error: Failed to read matrix_rows\n");
+        free(log->ct_abe.ct_key);
+        for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
+        free(log->ct_abe.C);
+        free(log->ct_sym.ciphertext);
+        free(log->ct_abe.C0);
+        fclose(fp);
+        return -1;
+    }
     if (matrix_rows > 0) {
         log->ct_abe.policy.matrix_rows = matrix_rows;
         log->ct_abe.policy.rho = (uint32_t*)malloc(matrix_rows * sizeof(uint32_t));
-        fread(log->ct_abe.policy.rho, sizeof(uint32_t), matrix_rows, fp);
+        if (!log->ct_abe.policy.rho) {
+            fprintf(stderr, "[Load] Error: Failed to allocate rho\n");
+            free(log->ct_abe.ct_key);
+            for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
+            free(log->ct_abe.C);
+            free(log->ct_sym.ciphertext);
+            free(log->ct_abe.C0);
+            fclose(fp);
+            return -1;
+        }
+        if (fread(log->ct_abe.policy.rho, sizeof(uint32_t), matrix_rows, fp) != matrix_rows) {
+            fprintf(stderr, "[Load] Error: Failed to read rho\n");
+            free(log->ct_abe.policy.rho);
+            free(log->ct_abe.ct_key);
+            for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
+            free(log->ct_abe.C);
+            free(log->ct_sym.ciphertext);
+            free(log->ct_abe.C0);
+            fclose(fp);
+            return -1;
+        }
     }
     
     fclose(fp);

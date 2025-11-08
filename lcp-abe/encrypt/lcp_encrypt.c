@@ -423,7 +423,13 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
                          const LogMetadata *metadata,
                          SymmetricCiphertext *ct_sym) {
     printf("[AES-GCM] DEBUG: Entry - log_len=%zu\n", log_len);
-    
+
+    // Sanity-check log_len to avoid acting on corrupted length fields
+    if (log_len == 0 || log_len > 10 * 1024 * 1024) { /* 10 MB upper bound */
+        fprintf(stderr, "[AES-GCM] ERROR: suspicious log_len=%zu\n", log_len);
+        return -1;
+    }
+
     // Allocate ciphertext buffer
     printf("[AES-GCM] DEBUG: Allocating ciphertext buffer (%zu bytes)\n", log_len);
     ct_sym->ciphertext = (uint8_t*)malloc(log_len);
@@ -578,16 +584,25 @@ int encrypt_microbatch(const JsonLogEntry *logs,
         EncryptedLogObject *encrypted_log = &batch->logs[i];
         encrypted_log_init(encrypted_log);
         
-        // Copy metadata
-        strncpy(encrypted_log->metadata.timestamp, logs[i].timestamp, 32);
-        strncpy(encrypted_log->metadata.user_id, logs[i].user_id, 64);
-        strncpy(encrypted_log->metadata.user_role, logs[i].user_role, 32);
-        strncpy(encrypted_log->metadata.team, logs[i].team, 32);
-        strncpy(encrypted_log->metadata.action_type, logs[i].action_type, 32);
-        strncpy(encrypted_log->metadata.resource_id, logs[i].resource_id, 64);
-        strncpy(encrypted_log->metadata.resource_type, logs[i].resource_type, 32);
-        strncpy(encrypted_log->metadata.service_name, logs[i].service_name, 32);
-        strncpy(encrypted_log->metadata.region, logs[i].region, 32);
+    // Copy metadata (bounded and null-terminated)
+    strncpy(encrypted_log->metadata.timestamp, logs[i].timestamp, sizeof(encrypted_log->metadata.timestamp) - 1);
+    encrypted_log->metadata.timestamp[sizeof(encrypted_log->metadata.timestamp) - 1] = '\0';
+    strncpy(encrypted_log->metadata.user_id, logs[i].user_id, sizeof(encrypted_log->metadata.user_id) - 1);
+    encrypted_log->metadata.user_id[sizeof(encrypted_log->metadata.user_id) - 1] = '\0';
+    strncpy(encrypted_log->metadata.user_role, logs[i].user_role, sizeof(encrypted_log->metadata.user_role) - 1);
+    encrypted_log->metadata.user_role[sizeof(encrypted_log->metadata.user_role) - 1] = '\0';
+    strncpy(encrypted_log->metadata.team, logs[i].team, sizeof(encrypted_log->metadata.team) - 1);
+    encrypted_log->metadata.team[sizeof(encrypted_log->metadata.team) - 1] = '\0';
+    strncpy(encrypted_log->metadata.action_type, logs[i].action_type, sizeof(encrypted_log->metadata.action_type) - 1);
+    encrypted_log->metadata.action_type[sizeof(encrypted_log->metadata.action_type) - 1] = '\0';
+    strncpy(encrypted_log->metadata.resource_id, logs[i].resource_id, sizeof(encrypted_log->metadata.resource_id) - 1);
+    encrypted_log->metadata.resource_id[sizeof(encrypted_log->metadata.resource_id) - 1] = '\0';
+    strncpy(encrypted_log->metadata.resource_type, logs[i].resource_type, sizeof(encrypted_log->metadata.resource_type) - 1);
+    encrypted_log->metadata.resource_type[sizeof(encrypted_log->metadata.resource_type) - 1] = '\0';
+    strncpy(encrypted_log->metadata.service_name, logs[i].service_name, sizeof(encrypted_log->metadata.service_name) - 1);
+    encrypted_log->metadata.service_name[sizeof(encrypted_log->metadata.service_name) - 1] = '\0';
+    strncpy(encrypted_log->metadata.region, logs[i].region, sizeof(encrypted_log->metadata.region) - 1);
+    encrypted_log->metadata.region[sizeof(encrypted_log->metadata.region) - 1] = '\0';
         
         // Generate unique K_log and nonce for THIS log (content-level isolation)
         printf("[Microbatch]     Generating unique K_log (256-bit) and nonce (96-bit)\n");
@@ -768,12 +783,19 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
         printf("[Save]   Writing metadata (%zu bytes)\n", sizeof(LogMetadata));
         fwrite(&log->metadata, sizeof(LogMetadata), 1, fp);
         
-        // Write symmetric ciphertext (CT_sym)
-        printf("[Save]   Writing CT_sym header+data (len=%u)\n", log->ct_sym.ct_len);
-        fwrite(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp);
-        fwrite(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
-        fwrite(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
-        fwrite(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
+    // Write symmetric ciphertext (CT_sym)
+    printf("[Save]   Writing CT_sym header+data (len=%u)\n", log->ct_sym.ct_len);
+    // Sanity-check ct_len and ciphertext pointer before writing
+    if (log->ct_sym.ct_len == 0 || log->ct_sym.ct_len > 10 * 1024 * 1024 || !log->ct_sym.ciphertext) {
+        fprintf(stderr, "[Save] ERROR: Invalid CT_sym (ct_len=%u, ptr=%p)\n",
+            log->ct_sym.ct_len, (void*)log->ct_sym.ciphertext);
+        fclose(fp);
+        return -1;
+    }
+    fwrite(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp);
+    fwrite(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
+    fwrite(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
+    fwrite(log->ct_sym.tag, AES_TAG_SIZE, 1, fp);
         
         // Write ABE ciphertext (CT_ABE) - essential for decryption!
         // Write policy expression and component count
