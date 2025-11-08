@@ -265,8 +265,30 @@ void module_sample_G(signed_poly_matrix t, poly_matrix u)
 		{
 		signed_poly_matrix t_i = poly_matrix_element(t, PARAM_D, 0, i*PARAM_K);
 		poly u_i = poly_matrix_element(u, 1, i, 0);
-		
+
+		if (getenv("ARITH_DEBUG")) {
+			char tagu[80];
+			snprintf(tagu, sizeof(tagu), "SAMPLE_module_u_comp_i_%d", i);
+			// dump first component of u_i across CRT comps
+			for (int comp = 0; comp < LOG_R; comp++) {
+				char tag[96];
+				snprintf(tag, sizeof(tag), "%s_comp_%d", tagu, comp);
+				dump_crt_component(u_i, LOG_R, comp, tag);
+			}
+		}
+
 		ring_sample_G(t_i, u_i);
+
+		if (getenv("ARITH_DEBUG")) {
+			char tagt[80];
+			snprintf(tagt, sizeof(tagt), "SAMPLE_module_t_out_i_%d", i);
+			for (int comp = 0; comp < LOG_R; comp++) {
+				char tag[96];
+				snprintf(tag, sizeof(tag), "%s_comp_%d", tagt, comp);
+				// cast t_i to poly for dumping (signed values may be printed as unsigned)
+				dump_crt_component((poly)t_i, LOG_R, comp, tag);
+			}
+		}
 		}
 	}
 
@@ -583,18 +605,57 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 
 	multiply_by_A(v, A_m, (poly_matrix) p);
 
-	sub_poly(zero, zero, u, PARAM_N * PARAM_D - 1);
-	add_poly(v, v, zero, PARAM_N * PARAM_D - 1);	
+	if (getenv("ARITH_DEBUG")) {
+		// Dump the target 'u' first component for comparison
+		poly u0 = poly_matrix_element(u, 1, 0, 0);
+		for (int comp = 0; comp < LOG_R; comp++) {
+			char tag[80];
+			snprintf(tag, sizeof(tag), "SAMPLE_u_comp_%d", comp);
+			dump_crt_component(u0, LOG_R, comp, tag);
+		}
+
+		// Dump v (A * p - u) first component before applying h_inv
+		poly v0 = poly_matrix_element(v, 1, 0, 0);
+		for (int comp = 0; comp < LOG_R; comp++) {
+			char tagv[80];
+			snprintf(tagv, sizeof(tagv), "SAMPLE_v_before_hinv_comp_%d", comp);
+			dump_crt_component(v0, LOG_R, comp, tagv);
+		}
+	}
+
+	/* Directly compute v <- v - u (both are in CRT domain). */
+	sub_poly(v, v, u, PARAM_N * PARAM_D - 1);
 	
 	for(int i = 0 ; i < PARAM_D ; ++i)
 		{
 		poly v_i = poly_matrix_element(v, 1, i, 0);
-		
-		mul_crt_poly(prod, h_inv, v_i, LOG_R);
-		reduce_double_crt_poly(v_i, prod, LOG_R);
-		for(int j = 0 ; j < PARAM_N ; ++j)
-			{
-			v_i[j] = PARAM_Q - v_i[j];
+			if (getenv("ARITH_DEBUG")) {
+				char tagpre[80];
+				snprintf(tagpre, sizeof(tagpre), "SAMPLE_v_attr_%d_pre_hinv", i);
+				for (int comp = 0; comp < LOG_R; comp++) {
+					char tag[96];
+					snprintf(tag, sizeof(tag), "%s_comp_%d", tagpre, comp);
+					dump_crt_component(v_i, LOG_R, comp, tag);
+				}
+			}
+
+			mul_crt_poly(prod, h_inv, v_i, LOG_R);
+			reduce_double_crt_poly(v_i, prod, LOG_R);
+
+			if (getenv("ARITH_DEBUG")) {
+				char tagpost[80];
+				snprintf(tagpost, sizeof(tagpost), "SAMPLE_v_attr_%d_post_hinv", i);
+				for (int comp = 0; comp < LOG_R; comp++) {
+					char tag[96];
+					snprintf(tag, sizeof(tag), "%s_comp_%d", tagpost, comp);
+					dump_crt_component(v_i, LOG_R, comp, tag);
+				}
+			}
+
+			/* Normalize via reduce_naive after computing q - v to ensure each
+			 * coefficient lies in [0, q-1] and avoid stray residues. */
+			for (int j = 0; j < PARAM_N; ++j) {
+				v_i[j] = reduce_naive(PARAM_Q - v_i[j]);
 			}
 		}
 
@@ -606,12 +667,18 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	// Sample z from the G-lattice with target v
 	signed_poly_matrix z = (signed_poly_matrix) poly_matrix_element(x, 1, 2 * PARAM_D, 0); // store z at the end of x to get TI * z for cheaper
 	
-	module_sample_G(z, v);
-
-	
-	// Make sure z has positive coefficients and put it in the CRT domain
-	for(int i = 0 ; i < PARAM_N * PARAM_D * PARAM_K ; ++i)
-		{
+						/* Compute v <- v - u in-place. Previously code used a temporary
+						 * zero buffer then added it to v; doing the subtraction in-place
+						 * avoids accidental misuse of the temporary and keeps representation
+						 * consistent. */
+						sub_poly(v, v, u, PARAM_N * PARAM_D - 1);
+						mul_crt_poly(prod, h_inv, v_i, LOG_R);
+						reduce_double_crt_poly(v_i, prod, LOG_R);
+						/* Normalize via reduce_naive after computing q - v to ensure each
+						 * coefficient lies in [0, q-1] and avoid stray residues. */
+						for (int j = 0; j < PARAM_N; ++j) {
+							v_i[j] = reduce_naive(PARAM_Q - v_i[j]);
+						}
 		z[i] += PARAM_Q;
 		}
 	
