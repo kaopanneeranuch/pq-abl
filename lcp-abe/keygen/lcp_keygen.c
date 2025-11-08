@@ -220,9 +220,13 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
            target_0[0], target_0[1], target_0[2], target_0[3]);
     
-    // NOTE: target is already in CRT domain (β and sum_term are both CRT)
-    // NO need to convert again - sample_pre_target expects CRT input
-    
+    // Convert target into coefficient representation before sampling. The
+    // Module_BFRS sampler expects its target (the right-hand side of the coset
+    // equation) in the coefficient domain so it can switch back and forth
+    // internally. Feeding CRT coefficients here caused the large residuals we
+    // observed in verify_keygen.
+    matrix_coeffs_representation(target, PARAM_D, 1, LOG_R);
+
     // Use sample_pre_target to sample ωA
     // Note: sample_pre_target expects h_inv parameter, we can use identity polynomial
     poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));

@@ -23,8 +23,10 @@ LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # Sample pools for randomized fields
-ROLES = ["devops", "admin", "analyst", "auditor", "user"]
-TEAMS = ["infra-team", "storage-team", "app-team", "sec-team"]
+# ROLES = ["devops", "admin", "analyst", "auditor", "user"]
+ROLES = ["admin"]
+# TEAMS = ["infra-team", "storage-team", "app-team", "sec-team"]
+TEAMS = ["storage-team", "app-team"]
 ACTION_TYPES = ["deploy", "read", "write", "delete", "config_change", "backup", "restore"]
 RESOURCE_TYPES = ["VM", "Container", "Bucket", "Database", "Network", "Queue"]
 SERVICES = ["EC2", "S3", "RDS", "K8S", "Lambda", "CloudFront"]
