@@ -615,6 +615,8 @@ int encrypt_microbatch(const JsonLogEntry *logs,
             free(s_shared);
             return -1;
         }
+     printf("[Microbatch]     DEBUG: ct_len after AES = %u (log_len=%zu)\n",
+         encrypted_log->ct_sym.ct_len, log_len);
         
         // ABE encryption of K_log using SHARED components (lightweight!)
         printf("[Microbatch]     ABE key encryption (reusing shared s, C0, C[i])\n");
@@ -628,6 +630,8 @@ int encrypt_microbatch(const JsonLogEntry *logs,
         // Compute hash h_i = SHA3-256(CT_obj)
         printf("[Microbatch]     Computing SHA3-256 hash\n");
         sha3_256_log_object(encrypted_log, encrypted_log->hash);
+     printf("[Microbatch]     DEBUG: ct_len after hash = %u\n",
+         encrypted_log->ct_sym.ct_len);
         
         if (i == 0) {
             printf("[Microbatch]     Log 1/%d: Full cost (sampled s, computed C0, C[i], ct_key)\n\n", n_logs);
