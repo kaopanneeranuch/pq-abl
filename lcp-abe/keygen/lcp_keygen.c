@@ -193,28 +193,31 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     // ========================================================================
     // CORRECTED CP-ABE KEYGEN FORMULA:
     // 
-    // target = β (NO subtraction of B terms!)
+    // target = β - Σ(B[i]·ω[i])
     // 
-    // This way: A·ω_A = β
+    // This ensures: A·ω_A + Σ(B[i]·ω[i]) = β
     // 
     // During decryption:
     //   ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
-    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[ρ(j)]·ω[ρ(j)])·s[0])
-    //   = β·s[0] + Σ(coeff[j]·(B[ρ(j)]·ω[ρ(j)])·s[0])
-    //   ≈ β·s[0]  (since B[ρ(j)]·ω[ρ(j)] ≈ small noise)
-    //
-    // The small noise from B[ρ(j)]·ω[ρ(j)] terms is acceptable
-    // as long as it doesn't exceed the error tolerance of LWE decoding
+    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[ρ(j)]·ω[ρ(j)])^T·s)
+    //   = (β - Σ(B[i]·ω[i]))^T·s + Σ(coeff[j]·(B[ρ(j)]·ω[ρ(j)])^T·s)
+    //   = β^T·s (when policy is satisfied and secret sharing reconstructs properly)
     // ========================================================================
     
     poly target_0 = poly_matrix_element(target, PARAM_D, 0, 0);
+    poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
+    
+    // target = β - sum_term (both in CRT domain)
     memcpy(target_0, mpk->beta, PARAM_N * sizeof(scalar));
+    sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
+    freeze_poly(target_0, PARAM_N - 1);
     
-    // NO subtraction of B terms - let them contribute as noise
-    // This is the correct lattice CP-ABE formula
-    
-    printf("[KeyGen]   Target = β (clean lattice CP-ABE formula)\n");
-    printf("[KeyGen]   DEBUG: target[0] = beta (first 4): %u %u %u %u\n",
+    printf("[KeyGen]   Target = β - Σ(B[i]·ω[i]) (CORRECTED formula)\n");
+    printf("[KeyGen]   DEBUG: beta (first 4): %u %u %u %u\n",
+           mpk->beta[0], mpk->beta[1], mpk->beta[2], mpk->beta[3]);
+    printf("[KeyGen]   DEBUG: sum_term (first 4): %u %u %u %u\n",
+           sum_0[0], sum_0[1], sum_0[2], sum_0[3]);
+    printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
            target_0[0], target_0[1], target_0[2], target_0[3]);
     
     // NOTE: target is already in CRT domain (β and sum_term are both CRT)
