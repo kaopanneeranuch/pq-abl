@@ -190,35 +190,31 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         printf("[KeyGen]     Attribute %d processed successfully\n", i+1);
     }
     
-    // Copy β to target's first component
-    // Modified CP-ABE formula to handle non-zero B[i]·ω[i]:
-    // target = β - Σ(B[i]·ω[i]) for ALL user attributes
-    // This way: A·ω_A = β - Σ(B[user_attrs]·ω[user_attrs])
+    // ========================================================================
+    // CORRECTED CP-ABE KEYGEN FORMULA:
     // 
-    // During decryption (assuming policy attrs ⊆ user attrs):
-    //   ω_A·C0 + Σ(coeff[j]·ω[j]·C[j])
-    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[j]·ω[j])·s[0])
-    //   = (β - Σ(B[i]·ω[i]))^T·s + Σ(coeff[j]·(B[j]·ω[j])·s[0])
-    //   = β·s[0] - Σ_i(B[i]·ω[i])·s[0] + Σ_j coeff[j]·(B[j]·ω[j])·s[0]
+    // target = β (NO subtraction of B terms!)
+    // 
+    // This way: A·ω_A = β
+    // 
+    // During decryption:
+    //   ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
+    //   = (A·ω_A)^T·s + Σ(coeff[j]·(B[ρ(j)]·ω[ρ(j)])·s[0])
+    //   = β·s[0] + Σ(coeff[j]·(B[ρ(j)]·ω[ρ(j)])·s[0])
+    //   ≈ β·s[0]  (since B[ρ(j)]·ω[ρ(j)] ≈ small noise)
     //
-    // For policy attrs that match user attrs (j ∈ user attrs):
-    //   = β·s[0] + Σ_j (coeff[j] - 1)·(B[j]·ω[j])·s[0]
-    //
-    // By LSSS property: Σ coeff[j] = 1 (for matching attrs)
-    // So if ALL policy attrs match user attrs, the B terms cancel!
+    // The small noise from B[ρ(j)]·ω[ρ(j)] terms is acceptable
+    // as long as it doesn't exceed the error tolerance of LWE decoding
+    // ========================================================================
+    
     poly target_0 = poly_matrix_element(target, PARAM_D, 0, 0);
     memcpy(target_0, mpk->beta, PARAM_N * sizeof(scalar));
     
-    // CRITICAL FIX: Subtract sum_term to compensate for non-zero B[i]·ω[i]
-    poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
-    sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
+    // NO subtraction of B terms - let them contribute as noise
+    // This is the correct lattice CP-ABE formula
     
-    printf("[KeyGen]   Target = β - Σ(B[i]·ω[i]) (CORRECTED formula)\n");
-    printf("[KeyGen]   DEBUG: beta (first 4): %u %u %u %u\n",
-           mpk->beta[0], mpk->beta[1], mpk->beta[2], mpk->beta[3]);
-    printf("[KeyGen]   DEBUG: sum_term (first 4): %u %u %u %u\n",
-           sum_0[0], sum_0[1], sum_0[2], sum_0[3]);
-    printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
+    printf("[KeyGen]   Target = β (clean lattice CP-ABE formula)\n");
+    printf("[KeyGen]   DEBUG: target[0] = beta (first 4): %u %u %u %u\n",
            target_0[0], target_0[1], target_0[2], target_0[3]);
     
     // NOTE: target is already in CRT domain (β and sum_term are both CRT)

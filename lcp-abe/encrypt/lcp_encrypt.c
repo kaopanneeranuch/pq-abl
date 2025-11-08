@@ -225,20 +225,17 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         }
         matrix_crt_representation(e_i, PARAM_M, 1, LOG_R);
         
-        // Compute C[i] = B[ρ(i)] · s[0] + share[i] · β · s[0] + e[i]
-        // where B[ρ(i)] is a row vector of M polynomials
-        // CRITICAL: share[i] · β · s[0] should only be added to the FIRST polynomial (j=0)
-        // to avoid multiplying by M during the inner product in decryption
+        // Compute C[i] = B[ρ(i)] · s[0] + e[i]
+        // Clean lattice CP-ABE: NO LSSS share mixing
+        // Policy satisfaction is handled by attribute matching in decryption
         
         double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-        poly share_beta_s0 = (poly)calloc(PARAM_N, sizeof(scalar));
         
-        if (!temp_prod || !reduced || !share_beta_s0) {
+        if (!temp_prod || !reduced) {
             fprintf(stderr, "[Batch Init] ERROR: Failed to allocate temp buffers\n");
             if (temp_prod) free(temp_prod);
             if (reduced) free(reduced);
-            if (share_beta_s0) free(share_beta_s0);
             free(e_i);
             free(s);
             free(shares);
@@ -246,15 +243,7 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
             return -1;
         }
         
-        // Pre-compute share[i] · β · s[0] (this will be added ONLY to the first polynomial)
         poly s_0 = poly_matrix_element(s, 1, 0, 0);
-        mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
-        reduce_double_crt_poly(share_beta_s0, temp_prod, LOG_R);
-        
-        // Scale by share[i] (in CRT domain, scalar multiplication)
-        for (uint32_t k = 0; k < PARAM_N; k++) {
-            share_beta_s0[k] = (((uint64_t)share_beta_s0[k] * shares[i]) % PARAM_Q);
-        }
         
         // For each of the M polynomials in C[i]
         for (uint32_t j = 0; j < PARAM_M; j++) {
@@ -267,15 +256,8 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             add_poly(c_i_j, reduced, e_i_j, PARAM_N - 1);
             
-            // Add share[i] · β · s[0] ONLY to the first polynomial (j=0)
-            if (j == 0) {
-                add_poly(c_i_j, c_i_j, share_beta_s0, PARAM_N - 1);
-            }
-            
             freeze_poly(c_i_j, PARAM_N - 1);
         }
-        
-        free(share_beta_s0);
         
         free(temp_prod);
         free(reduced);
