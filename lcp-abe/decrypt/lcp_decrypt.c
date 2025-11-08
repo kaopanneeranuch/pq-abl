@@ -179,20 +179,44 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
     // Extract K_log by rounding to nearest byte value
-    // Decoding inverts the encoding: K_log[i] = round(recovered[i] / 2^22)
-    printf("[Decrypt]   Extracting K_log using rounding (recovered >> %d):\n", PARAM_K - 8);
+    // Use centered lift: if recovered[i] > Q/2, treat as negative (recovered[i] - Q)
+    printf("[Decrypt]   Extracting K_log using centered modular reduction:\n");
     printf("[Decrypt]   ");
     const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
+    const uint32_t Q_half = PARAM_Q / 2;
     for (int i = 0; i < 8; i++) {
+        // Centered lift: map [0, Q) to [-Q/2, Q/2)
+        int64_t centered = (int64_t)recovered[i];
+        if (centered > Q_half) {
+            centered -= PARAM_Q;
+        }
         // Round to nearest: add 2^(shift-1) before right-shifting
-        uint64_t rounded = ((uint64_t)recovered[i] + (1ULL << (shift - 1))) >> shift;
+        // Handle negative values correctly
+        int64_t rounded;
+        if (centered >= 0) {
+            rounded = (centered + (1LL << (shift - 1))) >> shift;
+        } else {
+            // For negative: round toward zero after shift
+            rounded = -((-centered + (1LL << (shift - 1))) >> shift);
+        }
         printf("%02x ", (uint8_t)(rounded & 0xFF));
     }
     printf("\n");
     
-    // Extract full K_log using proper rounding
+    // Extract full K_log using centered modular reduction
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        uint64_t rounded = ((uint64_t)recovered[i] + (1ULL << (shift - 1))) >> shift;
+        // Centered lift
+        int64_t centered = (int64_t)recovered[i];
+        if (centered > Q_half) {
+            centered -= PARAM_Q;
+        }
+        // Round to nearest
+        int64_t rounded;
+        if (centered >= 0) {
+            rounded = (centered + (1LL << (shift - 1))) >> shift;
+        } else {
+            rounded = -((-centered + (1LL << (shift - 1))) >> shift);
+        }
         key_out[i] = (uint8_t)(rounded & 0xFF);
     }
     
