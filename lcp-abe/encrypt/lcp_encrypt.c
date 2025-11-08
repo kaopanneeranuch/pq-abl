@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <errno.h>
 
 /*
  * Phase 3: Log Encryption and Submission (Optimized for Batch and Asynchronous Commit)
@@ -733,11 +734,10 @@ int process_logs_microbatch(const JsonLogArray *logs,
 
 int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
     // Create output directory if needed
-#ifdef _WIN32
-    _mkdir(output_dir);
-#else
-    mkdir(output_dir, 0755);
-#endif
+    if (mkdir(output_dir, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "[Save] ERROR: Failed to create directory %s (errno=%d)\n", output_dir, errno);
+        return -1;
+    }
     
     // Save each CT_obj as a separate file
     for (uint32_t i = 0; i < batch->n_logs; i++) {
@@ -769,9 +769,11 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
         }
         
         // Write metadata
+        printf("[Save]   Writing metadata (%zu bytes)\n", sizeof(LogMetadata));
         fwrite(&log->metadata, sizeof(LogMetadata), 1, fp);
         
         // Write symmetric ciphertext (CT_sym)
+        printf("[Save]   Writing CT_sym header+data (len=%u)\n", log->ct_sym.ct_len);
         fwrite(&log->ct_sym.ct_len, sizeof(uint32_t), 1, fp);
         fwrite(log->ct_sym.ciphertext, log->ct_sym.ct_len, 1, fp);
         fwrite(log->ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
@@ -779,27 +781,38 @@ int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
         
         // Write ABE ciphertext (CT_ABE) - essential for decryption!
         // Write policy expression and component count
+        printf("[Save]   Writing policy expression (%zu bytes)\n", (size_t)MAX_POLICY_SIZE);
         fwrite(log->ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
         fwrite(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp);
         
         // Write C0 (m x n matrix in CRT domain)
         size_t c0_size = PARAM_M * PARAM_N;
+        printf("[Save]   Writing C0 (%zu scalars)\n", c0_size);
         fwrite(log->ct_abe.C0, sizeof(scalar), c0_size, fp);
         
         // Write each C[i] component
         for (uint32_t j = 0; j < log->ct_abe.n_components; j++) {
+            if (!log->ct_abe.C || !log->ct_abe.C[j]) {
+                fprintf(stderr, "[Save] ERROR: C[%u] is NULL (n_components=%u)\n", j, log->ct_abe.n_components);
+                fclose(fp);
+                return -1;
+            }
+            printf("[Save]   Writing C[%u] (%zu scalars)\n", j, c0_size);
             fwrite(log->ct_abe.C[j], sizeof(scalar), c0_size, fp);
         }
         
         // Write ct_key (the encapsulated K_log)
+        printf("[Save]   Writing ct_key (%u scalars)\n", PARAM_N);
         fwrite(log->ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
         
         // Write rho (attribute mapping)
         if (log->ct_abe.policy.rho && log->ct_abe.policy.matrix_rows > 0) {
+            printf("[Save]   Writing rho (rows=%u)\n", log->ct_abe.policy.matrix_rows);
             fwrite(&log->ct_abe.policy.matrix_rows, sizeof(uint32_t), 1, fp);
             fwrite(log->ct_abe.policy.rho, sizeof(uint32_t), log->ct_abe.policy.matrix_rows, fp);
         } else {
             uint32_t zero = 0;
+            printf("[Save]   Writing empty rho\n");
             fwrite(&zero, sizeof(uint32_t), 1, fp);
         }
         
