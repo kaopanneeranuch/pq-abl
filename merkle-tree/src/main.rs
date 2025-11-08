@@ -1,6 +1,6 @@
 /*
 This code is based on the opensource (Apache 2.0 license) that can be found her:
-https://github.com/evadawnley/global/blob/main/crates/utility/src/hashing.rs
+
 */
 /*
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,10 +20,11 @@ limitations under the License.
 use std::{
     fmt,
     fs::{File, OpenOptions},
-    fs,
     io::{prelude::*, BufReader},
-    path::Path};
+    path::Path,
+    env};
 use sha3::{Digest, Sha3_256};
+use hex;
 
 // Define the hash size (32 bytes for SHA3-256).
 const HASH_SIZE: usize = 32;
@@ -86,7 +87,7 @@ impl Hash {
 }
 
 /// Compute the Merkle root from a list of hashes.
-pub fn compute_root(hashes: &[Hash]) -> Hash {
+pub fn compute_root_proof(hashes: &[Hash]) -> Hash {
     let mut nodes: Vec<Hash> = hashes.to_vec();
     let mut length = nodes.len();
     let mut is_lowestpair = true;
@@ -95,10 +96,13 @@ pub fn compute_root(hashes: &[Hash]) -> Hash {
         let mut i = 0;
         while i < length {
             let left = &nodes[i];
+            println!("Left node: {:?}", left);
             let right = if i + 1 < length { &nodes[i + 1] } else { &nodes[i] };
+            println!("Right node: {:?}", right);
             nodes[i / 2] = *compute_hash_tree_branch(left, right);
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
+                println!("index: {}", i);
                 println!("Merkle Proof : {}", nodes[i / 2].to_hex_string());
                 let mut file_proof = OpenOptions::new()
                     .write(true)
@@ -108,8 +112,8 @@ pub fn compute_root(hashes: &[Hash]) -> Hash {
                 if let Err(e) = writeln!(file_proof, "{}", nodes[i/2].to_hex_string()){
                     eprintln!("Counldn't write proof to file: {}", e)
                 }
-                // fs::write("./temp", nodes[i/2].to_hex_string()).expect("Should be able to write to ./temp");
             }
+            println!();
             i += 2;
         }
         is_lowestpair = false; // turn lowest pair to false
@@ -138,10 +142,63 @@ fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
 
 fn main() {
     // Example data for the Merkle tree.
-    let mut v: Vec<_> = Vec::new(); // initialize vector
-    let lines = lines_from_file("../../log_hash"); // read line
-    for line in lines {
-        v.push(line.into_bytes()); // convert string array to byte and push into vector [u8]
+    let args:  Vec<String> = env::args().collect();
+    let arg_len = args.len();
+    if arg_len != 3 {
+        println!("The argument is not met");
+    }
+    else{
+        let feature = &args[1];
+        if feature == "compute" {
+            let digest_path = &args[2];
+            let _create_root_file = File::create("temp_root");
+            let _create_proof_file = File::create("temp_proof");
+            let mut leaf_hashes: Vec<_> = Vec::new(); // initialize vector
+            let lines = lines_from_file(digest_path); // read line
+            println!("Line: {:?}", lines);
+            for line in lines {
+            // Trim whitespace just in case (like newlines in your output)
+                let trimmed_line = line.trim();
+                if trimmed_line.is_empty() {
+                    continue;
+                }
+                
+                println!("Read Leaf Hash (Hex): {}", trimmed_line);
+
+                // 1. Decode the hex string into raw bytes
+                let decoded_bytes = hex::decode(trimmed_line)
+                    .expect("Failed to decode hex string from file");
+
+                // 2. Create a Hash object directly from those bytes
+                let hash = Hash::from_bytes(&decoded_bytes)
+                    .expect("Invalid hash length in file");
+                    
+                leaf_hashes.push(hash);
+            }
+        // Compute the hashes for the leaves.
+        // let leaf_hashes: Vec<Hash> = leaf_hashes.into_iter()
+        //     .map(|d| Hash::compute_hash(&d))
+        //     .collect();
+        // Compute the Merkle root && proof -> save to temp_proof and temp_root.
+        let merkle_root = compute_root_proof(&leaf_hashes);
+
+        // Output the results.
+        // println!("Merkle Root: {:?}", merkle_root);
+        println!("Merkle Root (Hex): {}", merkle_root.to_hex_string());
+        let mut file_root = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open("temp_root")
+            .unwrap();
+        if let Err(e) = writeln!(file_root, "{:?}", merkle_root){
+            eprintln!("Counldn't write to file: {}", e)
+            }
+        }
+        else if feature == "verify" {
+            if arg_len != 4{
+                println!("The argument missing:");
+            }
+        }
     }
     // let data = vec![
     //     b"Block 1".to_vec(),  value = [66, 108, 111, 99, 107, 32, 49]
@@ -152,24 +209,4 @@ fn main() {
     // for d in data{
     //     println!("{:?}", d);
     // }
-
-    // Compute the hashes for the leaves.
-    let leaf_hashes: Vec<Hash> = v.into_iter()
-        .map(|d| Hash::compute_hash(&d))
-        .collect();
-
-    // Compute the Merkle root.
-    let merkle_root = compute_root(&leaf_hashes);
-
-    // Output the results.
-    // println!("Merkle Root: {:?}", merkle_root);
-    println!("Merkle Root (Hex): {}", merkle_root.to_hex_string());
-    let mut file_root = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("temp_root")
-        .unwrap();
-    if let Err(e) = writeln!(file_root, "{}", merkle_root.to_hex_string()){
-        eprintln!("Counldn't write to file: {}", e)
-    }
 }
