@@ -25,8 +25,8 @@ cast send $CONTRACT_ADDR "createRecordMap(string,string,string)" $IPFS_ROOT_CID 
 # get all fork from blockchain and write first record to env var (2, 4, 6) , second = 8, 10, 12
 cast call $CONTRACT_ADDR "getAllInfoCurrentMapper()((string,string,string)[])" --private-key $PRIVATE_KEY | awk -F'"' '{print $2, $4, $6}' | column -t > temp_env
 GET_IPFS_ROOT_CID=$(cat temp_env| awk '{ print $1 }')
-GET_IPFS_PROOF_CID=$(cat temp_env| awk '{ print $1 }')
-GET_IPFS_CT_CID=$(cat temp_env| awk '{ print $1 }')
+GET_IPFS_PROOF_CID=$(cat temp_env| awk '{ print $2 }')
+GET_IPFS_CT_CID=$(cat temp_env| awk '{ print $3 }')
 #
 # # ipfs get data
 ipfs get $GET_IPFS_PROOF_CID -o ./epoch1_proof
