@@ -1,6 +1,7 @@
 ## Dependencies
     - cargo
     - sha3sum
+    - anvil
 
 ## Flow
     - python3 log_gen.py
