@@ -1,3 +1,3 @@
 #!/bin/bash
 
-rm log_hash temp_proof temp_root
+rm temp_proof temp_root log_digest
