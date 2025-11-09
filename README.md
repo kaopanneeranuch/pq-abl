@@ -1,2 +1,14 @@
-Init README
-- sha3 reference: https://github.com/brainhub/SHA3IUF.git : faster than linux sha3sum 
+## Dependencies
+    - cargo
+    - sha3sum
+
+## Flow
+    - python3 log_gen.py
+    - bash build_test.sh # build and test
+    - bash test.sh # only test
+    
+
+
+
+
+
