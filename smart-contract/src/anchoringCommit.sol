@@ -16,6 +16,7 @@ contract anchoringCommit {
         string root;
         string proofCid;
         string ctCid;
+        uint256 timestamp;
     }
     constructor (uint16 init) {
         recTracker = init;
@@ -37,7 +38,7 @@ contract anchoringCommit {
             delete fork; // empty arrays
         }
 
-        fork.push(structRecord({root: _rootHash, proofCid: _proofCid, ctCid: _ctCid}));
+        fork.push(structRecord({root: _rootHash, proofCid: _proofCid, ctCid: _ctCid, timestamp: block.timestamp}));
         mapper[mapperIndex] = fork;
         recTracker += 1;
     }
@@ -61,6 +62,10 @@ contract anchoringCommit {
     // get block hash by block number
     function getBlockHash(uint256 _num) public view returns (bytes32){ 
         return blockhash(_num);
+    }
+
+    function getNumEpoch() public view returns (uint16){
+        return recTracker;
     }
 
 }
