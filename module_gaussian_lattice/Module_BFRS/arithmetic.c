@@ -9,6 +9,14 @@
 #include "arithmetic.h"
 #include "random.h"
 
+/* Optional global dump address parsed from ARITH_DUMP_ADDR (hex). */
+static unsigned long arith_dump_addr = 0;
+
+/* Debug context marker (see arithmetic.h). Callers set this to a small
+ * integer to label which high-level conversion is running; debug prints
+ * will include it when ARITH_DUMP_INTERMEDIATE is enabled. */
+int ARITH_DEBUG_CONTEXT = 0;
+
 // Code from Dilithium
 
 #if (PARAM_Q == 1073740609)
@@ -21,26 +29,20 @@
 
 // static const scalar zetas[PARAM_R] = {0, 1002457797, 907562409, 246308725, 741357731, 738775482, 564424612, 584648601, 513104813, 938628629, 557351748, 209762326, 773848353, 180017277, 906952126, 747433592};
 
+
 // static const scalar zetas_inv[PARAM_R] = {326306345, 166787811, 893722660, 299891584, 863977611, 516388189, 135111308, 560635124, 489091336, 509315325, 334964455, 332382206, 827431212, 166177528, 71282140, 0};
 
 #endif
 
-
 /*************************************************
 * Name:        ntt
-*
-* Description: Forward NTT, in-place. No modular reduction is performed after
-*              additions or subtractions. Hence output coefficients can be up
-*              to 16*Q larger than the coefficients of the input polynomial.
-*              Output vector is in bitreversed order.
-*
-* Arguments:   - uint32_t p[N]: input/output coefficient array
-**************************************************/
-/*void ntt(uint32_t p[PARAM_N])
-	{
+*/
+/*void invntt_frominvmont(uint32_t p[PARAM_N])
+*/
+/*void invntt_frominvmont(uint32_t p[PARAM_N])
 	unsigned int len, start, j, k;
 	scalar zeta, t;
-	
+    
 	#ifdef ALWAYS_CSUBQ
 	scalar t1;
 	#endif
@@ -70,16 +72,6 @@
 		}
 	}*/
 
-/*************************************************
-* Name:        invntt_frominvmont
-*
-* Description: Inverse NTT and multiplication by Montgomery factor 2^32.
-*              In-place. No modular reductions after additions or
-*              subtractions. Input coefficient need to be smaller than 2*Q.
-*              Output coefficient are smaller than 2*Q.
-*
-* Arguments:   - uint32_t p[N]: input/output coefficient array
-**************************************************/
 /*void invntt_frominvmont(uint32_t p[PARAM_N])
 	{
 	unsigned int start, len, j, k;
@@ -753,8 +745,12 @@ void add_poly(poly h, poly f, poly g, int deg)
 	{
 	for(int i=0 ; i < deg + 1 ; ++i)
 		{
-		//h[i] = reduce_naive(f[i] + g[i]);
-		h[i] = f[i] + g[i];
+		/* Perform addition with 64-bit intermediate and reduce modulo Q to
+		 * avoid 32-bit wrap-around before normalization. This ensures that
+		 * (sum of terms) mod q is independent of the order of reduction and
+		 * matches semantics expected by higher-level code. */
+		uint64_t t = (uint64_t)f[i] + (uint64_t)g[i];
+		h[i] = (scalar)(t % PARAM_Q);
 		}
 	}
 
@@ -948,7 +944,25 @@ void coeffs_representation(poly f, int max_depth)
 			scalar c2 = cyclotomic_factorisation_tree[depth][breadth+1];
 			scalar u1 = bezout_coefficients_tree[depth][breadth];
 			scalar u2 = bezout_coefficients_tree[depth][breadth+1];
+			/* Optional debug: dump inputs to invert_crt and small slice of p1/p2 */
+			if (getenv("ARITH_DUMP_INTERMEDIATE")) {
+				printf("[ARITH INTER] ctx=%d coeffs_rep: depth=%d breadth=%d deg=%d c1=%u c2=%u u1=%u u2=%u p1_ptr=%p p2_ptr=%p\n",
+					ARITH_DEBUG_CONTEXT, depth, breadth, deg, (uint32_t)c1, (uint32_t)c2, (uint32_t)u1, (uint32_t)u2, (void*)p1, (void*)p2);
+				printf("[ARITH INTER] ctx=%d p1 first 8:", ARITH_DEBUG_CONTEXT); for (int _i=0; _i < 8 && _i < deg; ++_i) printf(" %u", (uint32_t)p1[_i]); printf("\n");
+				printf("[ARITH INTER] ctx=%d p2 first 8:", ARITH_DEBUG_CONTEXT); for (int _i=0; _i < 8 && _i < deg; ++_i) printf(" %u", (uint32_t)p2[_i]); printf("\n");
+			}
+
+			/* Canonicalize child CRT slices to their representatives in [0, PARAM_Q)
+			 * before recombining. Some code paths may leave components with
+			 * non-canonical residues (negative or >Q) and in-place operations can
+			 * propagate those differences up the tree. Freezing here is a
+			 * conservative mitigation to ensure invert_crt sees canonical inputs. */
+			freeze_poly(p1, deg - 1);
+			freeze_poly(p2, deg - 1);
 			invert_crt(p, p1, p2, deg, c1, c2, u1, u2);
+			if (getenv("ARITH_DUMP_INTERMEDIATE")) {
+				printf("[ARITH INTER] ctx=%d result p first 16:", ARITH_DEBUG_CONTEXT); for (int _i=0; _i < 16 && _i < 2*deg; ++_i) printf(" %u", (uint32_t)p[_i]); printf("\n");
+			}
 			
 			
 			// Store result where we fetched p1 and p2
@@ -965,6 +979,18 @@ void coeffs_representation(poly f, int max_depth)
 void mul_crt_poly(double_poly crt_h, poly crt_f, poly crt_g, int depth)
 	{
 	int deg = PARAM_N >> depth;
+	static int arith_debug = -1;
+	if(arith_debug == -1)
+	{
+		char *ev = getenv("ARITH_DEBUG");
+		arith_debug = (ev && strcmp(ev, "1") == 0) ? 1 : 0;
+	}
+
+	/* optional dump address (parsed from ARITH_DUMP_ADDR env var) */
+	if (arith_dump_addr == 0) {
+		char *dv = getenv("ARITH_DUMP_ADDR");
+		if (dv) arith_dump_addr = strtoul(dv, NULL, 16);
+	}
 	
 	// Multiply crt_f and crt_g coordinate by coordinate
 	for(int i=0 ; i < (1 << depth) ; ++i)
@@ -975,6 +1001,15 @@ void mul_crt_poly(double_poly crt_h, poly crt_f, poly crt_g, int depth)
 		
 		
 		mul_poly_schoolbook(h_i, f_i, g_i, deg-1, deg-1);
+
+		if(arith_debug && i < 2)
+		{
+			// Print a short snapshot of the non-normalized product (first few coeffs)
+			printf("[ARITH] mul_crt_poly: depth=%d, comp=%d, crt_f=%p, crt_g=%p, h_comp=%p, first-dcoeffs:", depth, i, (void*)crt_f, (void*)crt_g, (void*)h_i);
+			for(int t = 0; t < 4 && t < 2*deg; ++t)
+				printf(" %" PRIu64, (uint64_t) h_i[t]);
+			printf("\n");
+		}
 
 		}
 	}
@@ -988,20 +1023,115 @@ void mul_crt_poly(double_poly crt_h, poly crt_f, poly crt_g, int depth)
 void reduce_double_crt_poly(poly crt_f, double_poly double_crt_f, int depth)
 	{
 	int deg = PARAM_N >> depth;
+	static int arith_debug = -1;
+	if(arith_debug == -1)
+	{
+		char *ev = getenv("ARITH_DEBUG");
+		arith_debug = (ev && strcmp(ev, "1") == 0) ? 1 : 0;
+	}
 	
 	// Reduce double_crt_f coordinate by coordinate
 	for(int i=0 ; i < (1 << depth) ; ++i)
 		{
-		poly crt_f_i = crt_poly_component(crt_f, deg, i);
-		double_poly double_crt_f_i = crt_poly_component(double_crt_f, 2*deg, i);
+	poly crt_f_i = crt_poly_component(crt_f, deg, i);
+	double_poly double_crt_f_i = crt_poly_component(double_crt_f, 2*deg, i);
 		
 		scalar c = cyclotomic_factorisation_tree[depth][i];
 		
+		if(arith_debug && i < 2)
+		{
+			printf("[ARITH] reduce_double_crt_poly: depth=%d, comp=%d BEFORE reduction (first 4 double coeffs):", depth, i);
+			for(int t = 0; t < 4 && t < 2*deg; ++t)
+				printf(" %" PRIu64, (uint64_t) double_crt_f_i[t]);
+			printf("\n");
+		}
+
 		freeze_upper_half_double_poly(double_crt_f_i, deg);
 		modulo_double_poly(double_crt_f_i, deg, c);
 		freeze_double_poly(crt_f_i, double_crt_f_i, deg-1);
+
+		if(arith_debug && i < 2)
+		{
+			printf("[ARITH] reduce_double_crt_poly: depth=%d, comp=%d AFTER reduction (first 4 coeffs):", depth, i);
+			for(int t = 0; t < 4 && t < deg; ++t)
+				printf(" %" PRIu32, (uint32_t) crt_f_i[t]);
+			printf("\n");
+		}
+		/* Optional: if ARITH_DUMP_ADDR is set to the hex address of the double_crt_f component
+	 	(as printed by mul_crt_poly's h_comp), dump the full reduced component for inspection.
+	 	Usage: ARITH_DUMP_ADDR=0x12345 ARITH_DEBUG=1 ./build/test_roundtrip
+	 */
+		if (arith_dump_addr != 0 && (unsigned long)(void*)double_crt_f_i == arith_dump_addr) {
+			printf("[ARITH DUMP] Matched dump addr for h_comp=%#lx comp=%d deg=%d\n", arith_dump_addr, i, deg);
+			/* print full reduced coeffs (limit to first 128 to avoid massive output) */
+			int limit = deg < 128 ? deg : 128;
+			printf("[ARITH DUMP] reduced coeffs (first %d):", limit);
+			for (int t = 0; t < limit; ++t) printf(" %" PRIu32, (uint32_t) crt_f_i[t]);
+			printf("\n");
+		}
 		}
 	}
+
+/* Diagnostic helper: reduce and print one CRT component from a non-normalized
+ * double_poly `double_crt_f` for component index `comp_index` at `depth`.
+ * `tag` is printed to help identify the caller/site.
+ * This copies the component into a local buffer so it doesn't mutate inputs.
+ */
+void dump_double_crt_component(double_poly double_crt_f, int depth, int comp_index, const char *tag)
+{
+	int deg = PARAM_N >> depth;
+	double_scalar tmp_double[2 * PARAM_N]; /* big enough buffer */
+	poly tmp_poly = (poly)malloc((deg) * sizeof(scalar));
+	if (!tmp_poly) {
+		fprintf(stderr, "[ARITH DUMP] ERROR: malloc failed in dump_double_crt_component\n");
+		return;
+	}
+
+	double_poly comp = crt_poly_component(double_crt_f, 2*deg, comp_index);
+
+	/* copy 2*deg double coefficients into tmp_double (safe upper bound) */
+	for (int i = 0; i < 2*deg; ++i) tmp_double[i] = comp[i];
+
+	/* reduce same as reduce_double_crt_poly would do for this component */
+	freeze_upper_half_double_poly(tmp_double, deg);
+	scalar c = cyclotomic_factorisation_tree[depth][comp_index];
+	/* modulo_double_poly expects an array of length >= 2*deg but operates on first deg-1 entries */
+	/* we'll call modulo_double_poly on our tmp_double (it writes into tmp_double[0..deg-1]) */
+	modulo_double_poly(tmp_double, deg, c);
+	/* convert to reduced scalars */
+	freeze_double_poly(tmp_poly, tmp_double, deg-1);
+
+	/* print a concise dump (limit to first 256 coefficients) */
+	int limit = deg < 256 ? deg : 256;
+	printf("[ARITH DUMP] %s: reduced component (comp=%d, deg=%d, first %d):", tag, comp_index, deg, limit);
+	for (int i = 0; i < limit; ++i) printf(" %" PRIu32, (uint32_t) tmp_poly[i]);
+	printf("\n");
+
+	free(tmp_poly);
+}
+
+/* Dump a reduced CRT poly component (crt_f is expected to be in CRT domain).
+ * Prints the first up to 256 coefficients for component `comp_index` at `depth`.
+ */
+void dump_crt_component(poly crt_f, int depth, int comp_index, const char *tag)
+{
+	int deg = PARAM_N >> depth;
+	poly comp = crt_poly_component(crt_f, deg, comp_index);
+
+	int limit = deg < 256 ? deg : 256;
+	/* If the tag suggests this is a module sampler t output, print as signed
+	 * values so small negative samples aren't shown as large unsigned ints. */
+	bool print_signed = (strstr(tag, "t_out") != NULL) || (strstr(tag, "module_t_out") != NULL);
+	if (print_signed) {
+		printf("[ARITH DUMP] %s: CRT component (comp=%d, deg=%d, first %d):", tag, comp_index, deg, limit);
+		for (int i = 0; i < limit; ++i) printf(" %" PRId32, (int32_t) comp[i]);
+		printf("\n");
+	} else {
+		printf("[ARITH DUMP] %s: CRT component (comp=%d, deg=%d, first %d):", tag, comp_index, deg, limit);
+		for (int i = 0; i < limit; ++i) printf(" %" PRIu32, (uint32_t) comp[i]);
+		printf("\n");
+	}
+}
 
 
 /*

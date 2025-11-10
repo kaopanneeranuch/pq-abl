@@ -42,6 +42,12 @@ void sample_pre(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix 
 
 void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix cplx_T, cplx_poly_matrix sch_comp, poly h_inv, poly_matrix u);
 
+/* Debug helper: set an expected CRT-domain v (A·omega_A) so the sampler can
+ * compare it against the v it computes at runtime. Only used when
+ * ARITH_DEBUG is enabled. The caller should pass a CRT-representation
+ * pointer of size PARAM_D * PARAM_N scalars. */
+void sampler_debug_set_expected_v(poly expected_v);
+void sampler_debug_clear_expected_v(void);
 extern real d_coeffs[PARAM_K];
 extern real l_coeffs[PARAM_K];
 extern real h_coeffs[PARAM_K];

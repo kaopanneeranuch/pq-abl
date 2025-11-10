@@ -173,6 +173,16 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     // Also convert β to CRT for encryption
     printf("[Setup]   Converting β to CRT representation...\n");
     crt_representation(mpk->beta, LOG_R);
+    /* Diagnostic: when ARITH_DEBUG is set, dump each CRT component of mpk->beta
+     * right after generation so we can compare the MPK beta produced at setup
+     * time with the mpk->beta observed later during encryption. */
+    if (getenv("ARITH_DEBUG")) {
+        for (int comp = 0; comp < LOG_R; comp++) {
+            char tag[80];
+            snprintf(tag, sizeof(tag), "SETUP_mpk_beta_comp_%d", comp);
+            dump_crt_component(mpk->beta, LOG_R, comp, tag);
+        }
+    }
     
     // ========================================================================
     // Algorithm 1, Lines 6-7: Output MPK and MSK

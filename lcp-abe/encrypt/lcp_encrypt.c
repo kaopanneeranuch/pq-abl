@@ -190,10 +190,74 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     }
     
     // C0 = A^T · s + e0
+    /* Diagnostic mapping: print A_T_s element addresses and first4 BEFORE copy
+     * so we can correlate A_T_s entries with resulting C0 entries after memcpy. */
+    if (getenv("ARITH_DEBUG")) {
+        for (uint32_t _i = 0; _i < 16 && _i < PARAM_M; _i++) {
+            poly a_ts_elem = poly_matrix_element(A_T_s, 1, _i, 0);
+            printf("[ENCRYPT MAP] A_T_s idx=%u ptr=%p first4=%u %u %u %u\n",
+                   _i, (void*)a_ts_elem, a_ts_elem[0], a_ts_elem[1], a_ts_elem[2], a_ts_elem[3]);
+        }
+    }
     memcpy(ct_abe_template->C0, A_T_s, PARAM_M * PARAM_N * sizeof(scalar));
     add_poly(ct_abe_template->C0, ct_abe_template->C0, e0, PARAM_N * PARAM_M - 1);
     
+    // DIAGNOSTIC: print addresses and first coefficients of first few C0 polynomials
+    if (getenv("ARITH_DEBUG")) {
+        for (uint32_t _i = 0; _i < 6 && _i < PARAM_M; _i++) {
+            poly c0_i = poly_matrix_element(ct_abe_template->C0, 1, _i, 0);
+            printf("[ENCRYPT DIAG] C0_template i=%u ptr=%p first4=%u %u %u %u\n",
+                   _i, (void*)c0_i, c0_i[0], c0_i[1], c0_i[2], c0_i[3]);
+        }
+    }
+
     free(A_T_s);
+
+    /* Diagnostic: dump A_T_s polynomials (CRT components) and the s_j polynomials
+     * so we can compare A^T·s and the s vector with the decryption-side C0.
+     */
+    if (getenv("ARITH_DEBUG")) {
+        for (uint32_t ii = 0; ii < PARAM_D; ii++) {
+            poly s_i = poly_matrix_element(s, 1, ii, 0);
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char tags[80];
+                snprintf(tags, sizeof(tags), "ENCRYPT_s_poly_%u_comp_%d", ii, comp);
+                dump_crt_component(s_i, LOG_R, comp, tags);
+            }
+            /* Also dump full coefficient representation for s_i */
+            poly s_i_copy = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (s_i_copy) {
+                memcpy(s_i_copy, s_i, PARAM_N * sizeof(scalar));
+                coeffs_representation(s_i_copy, LOG_R);
+                printf("[ARITH DUMP] ENCRYPT_s_poly_%u_COEFF: COEFF (deg=%d, first %d):", ii, PARAM_N, PARAM_N);
+                for (int _k = 0; _k < PARAM_N; _k++) printf(" %" PRIu32, (uint32_t)s_i_copy[_k]);
+                printf("\n");
+                free(s_i_copy);
+            }
+        }
+
+        for (uint32_t ii = 0; ii < PARAM_M && ii < 8; ii++) {
+            poly a_ts_i = poly_matrix_element(ct_abe_template->C0, 1, ii, 0);
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char taga[96];
+                snprintf(taga, sizeof(taga), "ENCRYPT_A_T_s_poly_%u_comp_%d", ii, comp);
+                dump_crt_component(a_ts_i, LOG_R, comp, taga);
+            }
+            /* Also print first coefficients for quick pointer/first4 comparison */
+            printf("[ENCRYPT DIAG] A_T_s poly %u first4=%u %u %u %u ptr=%p\n",
+                   ii, a_ts_i[0], a_ts_i[1], a_ts_i[2], a_ts_i[3], (void*)a_ts_i);
+            /* Dump full coefficient representation for A_T_s poly (limited to first 8 polynomials) */
+            poly a_ts_copy = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (a_ts_copy) {
+                memcpy(a_ts_copy, a_ts_i, PARAM_N * sizeof(scalar));
+                coeffs_representation(a_ts_copy, LOG_R);
+                printf("[ARITH DUMP] ENCRYPT_A_T_s_poly_%u_COEFF: COEFF (deg=%d, first %d):", ii, PARAM_N, PARAM_N);
+                for (int _k = 0; _k < PARAM_N; _k++) printf(" %" PRIu32, (uint32_t)a_ts_copy[_k]);
+                printf("\n");
+                free(a_ts_copy);
+            }
+        }
+    }
     
     // Compute C[i] for each policy row (SHARED)
     printf("[Batch Init]   Computing shared C[i] components\n");
@@ -265,6 +329,17 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         free(e_i);
     }
     
+    // DIAGNOSTIC: dump first few C[i] polynomials (template)
+    if (getenv("ARITH_DEBUG")) {
+        for (uint32_t _i = 0; _i < 3 && _i < n_rows; _i++) {
+            for (uint32_t _j = 0; _j < 4 && _j < PARAM_M; _j++) {
+                poly c_ij = poly_matrix_element(ct_abe_template->C[_i], 1, _j, 0);
+                printf("[ENCRYPT DIAG] C_template i=%u j=%u ptr=%p first4=%u %u %u %u\n",
+                       _i, _j, (void*)c_ij, c_ij[0], c_ij[1], c_ij[2], c_ij[3]);
+            }
+        }
+    }
+
     free(e0);
     free(shares);
     
@@ -295,6 +370,14 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         return -1;
     }
     memcpy(ct_abe->C0, ct_abe_template->C0, PARAM_M * PARAM_N * sizeof(scalar));
+    // DIAGNOSTIC: print addresses and first coefficients of first few C0 polynomials (deep-copied)
+    if (getenv("ARITH_DEBUG")) {
+        for (uint32_t _i = 0; _i < 6 && _i < PARAM_M; _i++) {
+            poly c0_i = poly_matrix_element(ct_abe->C0, 1, _i, 0);
+            printf("[ENCRYPT DIAG] C0_deepcopy i=%u ptr=%p first4=%u %u %u %u\n",
+                   _i, (void*)c0_i, c0_i[0], c0_i[1], c0_i[2], c0_i[3]);
+        }
+    }
     
     // Deep copy C array
     uint32_t n_rows = ct_abe_template->policy.matrix_rows;
@@ -318,6 +401,17 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
             return -1;
         }
         memcpy(ct_abe->C[i], ct_abe_template->C[i], PARAM_M * PARAM_N * sizeof(scalar));
+    }
+
+    // DIAGNOSTIC: dump first few C[i] polynomials after deep-copy (per-log)
+    if (getenv("ARITH_DEBUG")) {
+        for (uint32_t _i = 0; _i < 3 && _i < n_rows; _i++) {
+            for (uint32_t _j = 0; _j < 4 && _j < PARAM_M; _j++) {
+                poly c_ij = poly_matrix_element(ct_abe->C[_i], 1, _j, 0);
+                printf("[ENCRYPT DIAG] C_deepcopy i=%u j=%u ptr=%p first4=%u %u %u %u\n",
+                       _i, _j, (void*)c_ij, c_ij[0], c_ij[1], c_ij[2], c_ij[3]);
+            }
+        }
     }
     
     // Allocate UNIQUE ct_key for this log
@@ -363,8 +457,39 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     }
     
     poly s_0 = poly_matrix_element(s, 1, 0, 0);
+    printf("[Batch Key] DEBUG: mul operands addresses: mpk->beta=%p s_0=%p temp_prod=%p\n", (void*)mpk->beta, (void*)s_0, (void*)temp_prod);
+    /* Diagnostic: dump mpk->beta and s_0 CRT components before multiplication */
+    if (getenv("ARITH_DEBUG")) {
+        for (int comp = 0; comp < LOG_R; comp++) {
+            char tb[80];
+            char ts[80];
+            snprintf(tb, sizeof(tb), "ENCRYPT_mpk_beta_comp_%d", comp);
+            snprintf(ts, sizeof(ts), "ENCRYPT_s0_comp_%d", comp);
+            dump_crt_component(mpk->beta, LOG_R, comp, tb);
+            dump_crt_component(s_0, LOG_R, comp, ts);
+        }
+    }
     mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
+    /* Diagnostic: when ARITH_DEBUG is set, dump each reduced CRT component
+     * for the freshly computed double_poly 'temp_prod'. This helps compare
+     * encryption-side reduced components with decryption-side accumulators. */
+    if (getenv("ARITH_DEBUG")) {
+        for (int comp = 0; comp < LOG_R; comp++) {
+            char tag[64];
+            snprintf(tag, sizeof(tag), "ENCRYPT_beta_s0_comp_%d", comp);
+            dump_double_crt_component(temp_prod, LOG_R, comp, tag);
+        }
+    }
     reduce_double_crt_poly(reduced, temp_prod, LOG_R);
+    /* Diagnostic: dump the reduced CRT components for beta*s_0 so they can be
+     * compared directly with decryption-side per-term reduced products. */
+    if (getenv("ARITH_DEBUG")) {
+        for (int comp = 0; comp < LOG_R; comp++) {
+            char tagr[80];
+            snprintf(tagr, sizeof(tagr), "ENCRYPT_beta_s0_reduced_comp_%d", comp);
+            dump_crt_component(reduced, LOG_R, comp, tagr);
+        }
+    }
     add_poly(ct_abe->ct_key, ct_abe->ct_key, reduced, PARAM_N - 1);
     
     free(temp_prod);
@@ -379,6 +504,60 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     
     // Encode K_log into ct_key (convert to coefficient domain)
     coeffs_representation(ct_abe->ct_key, LOG_R);
+
+    // EXTRA DEBUG: print beta*s_0 (coeff domain) to compare with decryption term
+    double_poly tmp_prod2 = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+    poly reduced_beta = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (tmp_prod2 && reduced_beta) {
+        printf("[Batch Key] DEBUG: (second) mul operands addresses: mpk->beta=%p s_0=%p tmp_prod2=%p\n", (void*)mpk->beta, (void*)s_0, (void*)tmp_prod2);
+        mul_crt_poly(tmp_prod2, mpk->beta, s_0, LOG_R);
+        /* Diagnostic: dump reduced CRT components for this second mul as well */
+        if (getenv("ARITH_DEBUG")) {
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char tag2[64];
+                snprintf(tag2, sizeof(tag2), "ENCRYPT_beta_s0_tmp2_comp_%d", comp);
+                dump_double_crt_component(tmp_prod2, LOG_R, comp, tag2);
+            }
+        }
+        reduce_double_crt_poly(reduced_beta, tmp_prod2, LOG_R);
+        if (getenv("ARITH_DEBUG")) {
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char tagb2[80];
+                snprintf(tagb2, sizeof(tagb2), "ENCRYPT_beta_s0_reduced_beta_comp_%d", comp);
+                dump_crt_component(reduced_beta, LOG_R, comp, tagb2);
+            }
+        }
+        coeffs_representation(reduced_beta, LOG_R);
+        printf("[Batch Key] DEBUG: beta*s0 (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               reduced_beta[0], reduced_beta[1], reduced_beta[2], reduced_beta[3]);
+
+        /* CRT <-> COEFF round-trip diagnostic (in-place conversions are used)
+         * Copy coefficient representation, convert to CRT and back, then compare.
+         * This is a lightweight check to detect conversion asymmetry. */
+        poly tmp_round = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (tmp_round) {
+            memcpy(tmp_round, reduced_beta, PARAM_N * sizeof(scalar));
+            /* tmp_round is COEFF -> convert to CRT -> convert back to COEFF */
+            crt_representation(tmp_round, LOG_R);
+            coeffs_representation(tmp_round, LOG_R);
+
+            int mismatch = 0;
+            for (int ii = 0; ii < 16; ii++) {
+                if (tmp_round[ii] != reduced_beta[ii]) {
+                    printf("[Batch Key] ROUNDTRIP MISMATCH at idx %d: orig=%u round=%u\n",
+                           ii, reduced_beta[ii], tmp_round[ii]);
+                    mismatch = 1;
+                    break;
+                }
+            }
+            if (!mismatch) {
+                printf("[Batch Key] ROUNDTRIP OK: coeffs<->CRT roundtrip preserved (first 16 equal)\n");
+            }
+            free(tmp_round);
+        }
+    }
+    if (tmp_prod2) free(tmp_prod2);
+    if (reduced_beta) free(reduced_beta);
     
     printf("[Batch Key] DEBUG: ct_key before K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
@@ -387,12 +566,25 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     // Scale by 2^(PARAM_K - 8) to place K_log in upper 8 bits
     // This maximizes noise tolerance for LWE decryption
     const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
+    /* Prepare an explicit encoded K_log coefficient vector for diagnostics.
+     * encoded_Kvec[i] holds the exact value added to ct_key[i] for i < AES_KEY_SIZE
+     * (and 0 elsewhere). We will optionally dump this so we can compare the
+     * expected encoded vector with what decryption recovers after subtraction. */
+    uint32_t encoded_Kvec[PARAM_N];
+    for (int _i = 0; _i < PARAM_N; _i++) encoded_Kvec[_i] = 0;
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         // Encode K_log in upper bits: multiply by 2^shift
         uint64_t encoded = (uint64_t)key[i] << shift;
+        encoded_Kvec[i] = (uint32_t)(encoded % PARAM_Q);
         // Add to ct_key (LWE noise term) and reduce mod Q
         uint64_t sum = (uint64_t)ct_abe->ct_key[i] + encoded;
         ct_abe->ct_key[i] = (uint32_t)(sum % PARAM_Q);
+    }
+
+    if (getenv("ARITH_DUMP_FULL")) {
+        printf("[ENCRYPT DUMP FULL] encoded_Klog_coeff_full:\n");
+        for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", encoded_Kvec[_i]);
+        printf("\n");
     }
     
     printf("[Batch Key] DEBUG: ct_key after K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
@@ -406,6 +598,25 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     
     printf("[Batch Key] DEBUG: ct_key stays in COEFF domain (first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
+    /* Optional full COEFF dump for exact-data comparison with decryption */
+    if (getenv("ARITH_DUMP_FULL")) {
+        printf("[ENCRYPT DUMP FULL] ct_key_coeff_full:\n");
+        for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", ct_abe->ct_key[_i]);
+        printf("\n");
+    }
+    /* Minimal provenance mode: print ct_key pointer and compact FNV64 hash so
+     * we can correlate encryption-side ct_key with decryption-side observations
+     * without producing very large logs. Controlled by ARITH_MIN_PROV. */
+    if (getenv("ARITH_MIN_PROV")) {
+        uint64_t fnv_enc = 1469598103934665603ULL;
+        for (int _i = 0; _i < PARAM_N; _i++) {
+            uint64_t v = (uint64_t)ct_abe->ct_key[_i];
+            fnv_enc ^= (v & 0xFFFFFFFFULL);
+            fnv_enc *= 1099511628211ULL;
+        }
+        printf("[ENCRYPT MINPROV] ct_key ptr=%p ENCODING FNV64=0x%016" PRIx64 "\n",
+               (void*)ct_abe->ct_key, fnv_enc);
+    }
     
     free(e_key);
     

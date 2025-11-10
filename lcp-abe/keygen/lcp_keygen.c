@@ -220,25 +220,213 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
            target_0[0], target_0[1], target_0[2], target_0[3]);
     
-    // Convert target into coefficient representation before sampling. The
-    // Module_BFRS sampler expects its target (the right-hand side of the coset
-    // equation) in the coefficient domain so it can switch back and forth
-    // internally. Feeding CRT coefficients here caused the large residuals we
-    // observed in verify_keygen.
-    matrix_coeffs_representation(target, PARAM_D, 1, LOG_R);
+    // NOTE: keep `target` in CRT domain here. sample_pre_target expects the
+    // target `u` to be in CRT representation because it does CRT-domain
+    // arithmetic (v <- A * p - u) before converting v to coefficient domain
+    // for the sampler. Converting `target` to COEFF here would mismatch that
+    // arithmetic and break the trapdoor relation.
 
     // Use sample_pre_target to sample ωA
     // Note: sample_pre_target expects h_inv parameter, we can use identity polynomial
     poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));
     h_inv[0] = 1;  // Identity
     crt_representation(h_inv, LOG_R);
+
+    if (getenv("ARITH_DEBUG")) {
+        /* Dump the target (CRT representation) so we can compare it to the
+         * sampler's SAMPLE_u dumps and ensure the sampler received the
+         * correct target. */
+        for (int comp = 0; comp < LOG_R; comp++) {
+            char tagt[80];
+            snprintf(tagt, sizeof(tagt), "KEYGEN_target_comp_%d", comp);
+            dump_crt_component(target_0, LOG_R, comp, tagt);
+        }
+    }
     
     sample_pre_target(usk->omega_A, mpk->A, msk->T, msk->cplx_T, msk->sch_comp, h_inv, target);
     
+    if (getenv("ARITH_DEBUG")) {
+        /* Print pointer and first coefficients of the buffer that should contain ωA */
+        fprintf(stderr, "[KEYGEN PTR] usk->omega_A=%p first8_coeffs:", (void*)usk->omega_A);
+        for (int k = 0; k < 8 && k < PARAM_N; ++k) fprintf(stderr, " %u", usk->omega_A[k]);
+        fprintf(stderr, "\n"); fflush(stderr);
+    }
+
+    /* Additional immediate diagnostic: compute A * omega_A right after sampling
+     * and dump its CRT components with an "immediate" tag so we can verify
+     * whether the value changes later in the function. This helps detect any
+     * post-sampling overwrite or representation mismatch between sampler and
+     * the later diagnostic. */
+    if (getenv("ARITH_DEBUG")) {
+        poly_matrix y_immediate = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+        if (y_immediate) {
+            multiply_by_A(y_immediate, mpk->A, usk->omega_A);
+            poly a0i = poly_matrix_element(y_immediate, 1, 0, 0);
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char tagi[80];
+                snprintf(tagi, sizeof(tagi), "KEYGEN_Aomega_immediate_comp_%d", comp);
+                dump_crt_component(a0i, LOG_R, comp, tagi);
+            }
+            free(y_immediate);
+        } else {
+            fprintf(stderr, "[KEYGEN DIAG] failed to allocate y_immediate\n"); fflush(stderr);
+        }
+    }
+
+    /* Diagnostic: test whether TI's columns are in the kernel of A by
+     * computing A * (TI * e_j) for a few basis vectors e_j of R^{dk}.
+     * If these are all zero, then TI does not influence A and the trapdoor
+     * relation is broken. */
+    if (getenv("ARITH_DEBUG")) {
+        int dk = PARAM_D * PARAM_K;
+        int max_test = dk < 4 ? dk : 4;
+        for (int j = 0; j < max_test; ++j) {
+            /* x is a dk-dimensional vector (polynomial matrix) with a single
+             * 1 at position j, used to compute TI * e_j. */
+            poly_matrix x = (poly_matrix)calloc(dk * PARAM_N, sizeof(scalar));
+            if (!x) {
+                fprintf(stderr, "[KEYGEN DIAG] failed to alloc x for TI test j=%d\n", j); fflush(stderr); break;
+            }
+
+            /* set polynomial j to 1 */
+            poly xj = poly_matrix_element(x, dk, 0, j);
+            xj[0] = 1;
+
+            /* convert x to CRT domain as multiply_by_TI expects CRT-domain inputs */
+            matrix_crt_representation(x, dk, 1, LOG_R);
+
+            /* y = TI * x (y is in R^m) */
+            poly_matrix y_ti = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
+            if (!y_ti) {
+                fprintf(stderr, "[KEYGEN DIAG] failed to alloc y_ti for j=%d\n", j); fflush(stderr); free(x); break;
+            }
+
+            multiply_by_TI(y_ti, msk->T, x);
+
+            /* compute A * (TI * e_j) */
+            poly_matrix ati = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+            if (!ati) {
+                fprintf(stderr, "[KEYGEN DIAG] failed to alloc ati for j=%d\n", j); fflush(stderr); free(x); free(y_ti); break;
+            }
+            multiply_by_A(ati, mpk->A, y_ti);
+
+            /* dump CRT components of first poly of ati */
+            poly ati0 = poly_matrix_element(ati, 1, 0, 0);
+            for (int comp = 0; comp < LOG_R; ++comp) {
+                char tag[80];
+                snprintf(tag, sizeof(tag), "KEYGEN_ATI_col_%d_comp_%d", j, comp);
+                dump_crt_component(ati0, LOG_R, comp, tag);
+            }
+
+            free(x);
+            free(y_ti);
+            free(ati);
+        }
+    }
+
     
     free(h_inv);
     free(target);
     free(sum_term);
+
+    /* Diagnostic: dump A·ω_A and Σ(B·ω) and their sum (lhs) immediately after keygen
+     * so we can determine whether the trapdoor identity held at sampling time. */
+    if (getenv("ARITH_DEBUG")) {
+        printf("[KeyGen DIAG] Dumping A·omega_A and sum(B·omega) after sampling ωA\n");
+
+        // Compute A * omega_A (y is D-dimensional)
+        poly_matrix y = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+        if (y) {
+            multiply_by_A(y, mpk->A, usk->omega_A);
+            poly a0 = poly_matrix_element(y, 1, 0, 0);
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char tag[80];
+                snprintf(tag, sizeof(tag), "KEYGEN_Aomega_comp_%d", comp);
+                dump_crt_component(a0, LOG_R, comp, tag);
+            }
+        }
+
+        // Recompute Σ(B_plus[i] · omega_i) (sum_term was freed) into b_sum
+        poly b_sum = (poly)calloc(PARAM_N, sizeof(scalar));
+        double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (b_sum && prod && reduced) {
+            for (uint32_t ai = 0; ai < usk->n_components; ai++) {
+                uint32_t attr_idx = usk->attr_set.attrs[ai].index;
+                if (attr_idx >= mpk->n_attributes) continue;
+
+                poly_matrix B_plus_row = &mpk->B_plus[attr_idx * PARAM_M * PARAM_N];
+                poly temp_res = (poly)calloc(PARAM_N, sizeof(scalar));
+                if (!temp_res) continue;
+
+                for (uint32_t j = 0; j < PARAM_M; j++) {
+                    poly B_ij = &B_plus_row[j * PARAM_N];
+                    poly omega_ij = poly_matrix_element(usk->omega_i[ai], 1, j, 0);
+                    memset(prod, 0, 2 * PARAM_N * sizeof(double_scalar));
+                    memset(reduced, 0, PARAM_N * sizeof(scalar));
+                    mul_crt_poly(prod, B_ij, omega_ij, LOG_R);
+                    reduce_double_crt_poly(reduced, prod, LOG_R);
+                    add_poly(temp_res, temp_res, reduced, PARAM_N - 1);
+                    freeze_poly(temp_res, PARAM_N - 1);
+                }
+
+                add_poly(b_sum, b_sum, temp_res, PARAM_N - 1);
+                freeze_poly(b_sum, PARAM_N - 1);
+                free(temp_res);
+            }
+
+            for (int comp = 0; comp < LOG_R; comp++) {
+                char tagb[80];
+                snprintf(tagb, sizeof(tagb), "KEYGEN_Bomega_sum_comp_%d", comp);
+                dump_crt_component(b_sum, LOG_R, comp, tagb);
+            }
+
+            // Compute lhs = A·ω_A + b_sum (only first poly of A·ω_A used)
+            if (y && b_sum) {
+                poly lhs = (poly)calloc(PARAM_N, sizeof(scalar));
+                poly a0 = poly_matrix_element(y, 1, 0, 0);
+                memcpy(lhs, a0, PARAM_N * sizeof(scalar));
+                add_poly(lhs, lhs, b_sum, PARAM_N - 1);
+                freeze_poly(lhs, PARAM_N - 1);
+
+                for (int comp = 0; comp < LOG_R; comp++) {
+                    char tagl[80];
+                    snprintf(tagl, sizeof(tagl), "KEYGEN_lhs_AplusB_comp_%d", comp);
+                    dump_crt_component(lhs, LOG_R, comp, tagl);
+                }
+
+                // Also dump mpk->beta components for direct comparison
+                for (int comp = 0; comp < LOG_R; comp++) {
+                    char tagbeta[80];
+                    snprintf(tagbeta, sizeof(tagbeta), "KEYGEN_mpk_beta_comp_%d", comp);
+                    dump_crt_component(mpk->beta, LOG_R, comp, tagbeta);
+                }
+
+                /* Quick ARITH_DEBUG assertion: compare lhs coefficients to mpk->beta
+                 * and abort with a focused message on first mismatch. This provides
+                 * a compact failing snapshot for debugging sampler/target issues. */
+                if (getenv("ARITH_DEBUG")) {
+                    for (int idx = 0; idx < PARAM_N; ++idx) {
+                        if (lhs[idx] != mpk->beta[idx]) {
+                            fprintf(stderr, "[KEYGEN ASSERT] trapdoor mismatch at coeff %d: lhs=%u mpk=%u (first mismatch)\n", idx, lhs[idx], mpk->beta[idx]);
+                            fflush(stderr);
+                            /* Exit to produce a focused failure snapshot */
+                            exit(2);
+                        }
+                    }
+                    fprintf(stderr, "[KEYGEN ASSERT] trapdoor identity holds (coeff-wise)\n");
+                    fflush(stderr);
+                }
+
+                free(lhs);
+            }
+        }
+
+        if (prod) free(prod);
+        if (reduced) free(reduced);
+        if (b_sum) free(b_sum);
+        if (y) free(y);
+    }
     
     // ========================================================================
     // Algorithm 2, Line 6: Return SKY = (ωA, {ωi}_{xi∈Y})

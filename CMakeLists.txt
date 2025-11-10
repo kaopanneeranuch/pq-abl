@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(pq_abl C)
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -Wextra -march=native")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -Wextra")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-parameter -Wno-unused-variable")
 
 # Add math library
@@ -73,11 +73,23 @@ target_link_libraries(test_keygen lcp_abe)
 add_executable(test_encrypt lcp-abe/test/encrypt.c)
 target_link_libraries(test_encrypt lcp_abe)
 
+# In-memory round-trip test
+add_executable(test_roundtrip lcp-abe/test/test_roundtrip.c)
+target_include_directories(test_roundtrip PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
+target_link_libraries(test_roundtrip PRIVATE lcp_abe module_bfrs m)
+
 add_executable(test_decrypt lcp-abe/test/decrypt.c)
 target_link_libraries(test_decrypt lcp_abe)
 
 add_executable(test_verify_keygen lcp-abe/test/verify_keygen.c)
 target_link_libraries(test_verify_keygen lcp_abe)
+
+# Linearity diagnostic: test coeffs_representation linearity
+add_executable(coeffs_linearity lcp-abe/test/coeffs_linearity.c)
+target_link_libraries(coeffs_linearity lcp_abe)
+
+add_executable(coeffs_failing_case lcp-abe/test/coeffs_failing_case.c)
+target_link_libraries(coeffs_failing_case lcp_abe)
 
 # Utility to view CT_obj files
 add_executable(view_ctobj lcp-abe/util/view_ctobj.c)

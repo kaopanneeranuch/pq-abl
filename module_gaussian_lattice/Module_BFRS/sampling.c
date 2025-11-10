@@ -10,6 +10,35 @@
 #include "sampling.h"
 #include "arithmetic.h"
 
+/* Debug storage for expected v (A·omega_A) used only with ARITH_DEBUG.
+ * Stored in CRT representation as PARAM_D * PARAM_N scalars. */
+static scalar *sampler_debug_expected_v = NULL;
+static int sampler_debug_expected_v_set = 0;
+
+void sampler_debug_set_expected_v(poly expected_v)
+{
+	if (!getenv("ARITH_DEBUG")) return;
+	if (!sampler_debug_expected_v) {
+		sampler_debug_expected_v = malloc(sizeof(scalar) * PARAM_D * PARAM_N);
+		if (!sampler_debug_expected_v) {
+			fprintf(stderr, "[SAMPLER DEBUG] malloc failed\n"); fflush(stderr);
+			return;
+		}
+	}
+	/* expected_v points to a sequence of PARAM_D polynomials of length PARAM_N */
+	memcpy(sampler_debug_expected_v, expected_v, sizeof(scalar) * PARAM_D * PARAM_N);
+	sampler_debug_expected_v_set = 1;
+}
+
+void sampler_debug_clear_expected_v(void)
+{
+	if (sampler_debug_expected_v) {
+		free(sampler_debug_expected_v);
+		sampler_debug_expected_v = NULL;
+	}
+	sampler_debug_expected_v_set = 0;
+}
+
 /*
 	Generates a matrix A in R_q^{d,m} along with its trapdoor T in R^{2d,dk}
 		A's first d columns are implicit, since they are the identity I_d
@@ -315,7 +344,12 @@ void sample_2z(signed_scalar *q, cplx_poly cplx_q, cplx_poly a, cplx_poly b, cpl
 	sample_fz(q0, cplx_q0, a, c0, depth);
 	
 	// Update cplx_q by merging q0 and q1 the FFT way
-	inverse_stride(cplx_q, depth - 1);
+	// Defensive: avoid calling with negative depth (UB when depth == 0)
+	if (depth > 0) {
+		inverse_stride(cplx_q, depth - 1);
+	} else {
+		inverse_stride(cplx_q, 0);
+	}
 	}
 
 /*
@@ -538,7 +572,37 @@ void sample_pre(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix 
 	add_poly(x, x, (poly) p, PARAM_N * PARAM_M - 1);
 	// Reduce x mod q one final time but keep it in the CRT domain
 	freeze_poly(x, PARAM_N * PARAM_M - 1);
+
+	/* Debug: print pointer and first few coefficients of x (which should be the
+	 * caller's omega_A buffer). This helps detect aliasing/copy issues. */
+	if (getenv("ARITH_DEBUG")) {
+		poly x0 = poly_matrix_element(x, 1, 0, 0);
+		fprintf(stderr, "[SAMPLER PTR] x=%p first8_coeffs:", (void*)x);
+		for (int k = 0; k < 8 && k < PARAM_N; ++k) fprintf(stderr, " %u", x0[k]);
+		fprintf(stderr, "\n"); fflush(stderr);
 	}
+
+	/* Debug: print pointer and first few coefficients of x (which should be the
+	 * caller's omega_A buffer). This helps detect aliasing/copy issues. */
+	if (getenv("ARITH_DEBUG")) {
+		poly x0 = poly_matrix_element(x, 1, 0, 0);
+		fprintf(stderr, "[SAMPLER PTR] x=%p first8_coeffs:", (void*)x);
+		for (int k = 0; k < 8 && k < PARAM_N; ++k) fprintf(stderr, " %u", x0[k]);
+		fprintf(stderr, "\n"); fflush(stderr);
+	}
+
+	/* Debug: print pointer and first few coefficients of x (which should be the
+	 * caller's omega_A buffer). This helps detect aliasing/copy issues. */
+	if (getenv("ARITH_DEBUG")) {
+		poly x0 = poly_matrix_element(x, 1, 0, 0);
+		fprintf(stderr, "[SAMPLER PTR] x=%p first8_coeffs:", (void*)x);
+		for (int k = 0; k < 8 && k < PARAM_N; ++k) fprintf(stderr, " %u", x0[k]);
+		fprintf(stderr, "\n"); fflush(stderr);
+	}
+	}
+
+
+	
 
 
 
@@ -569,11 +633,66 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	printf("[DEBUG] sample_pre_target: Converting p to CRT...\n"); fflush(stdout);
 	matrix_crt_representation((poly_matrix) p, PARAM_M, 1, LOG_R);
 	printf("[DEBUG] sample_pre_target: p in CRT domain\n"); fflush(stdout);
+
+	/* Adjust p's first d polynomials so that A * p == u (make p a particular solution)
+	 * This is necessary because TI spans the kernel of A: adding TI*z will not
+	 * change A*p, so p must already satisfy the target u. */
+	if (getenv("ARITH_DEBUG")) {
+		// compute tmp = A * p
+		poly_matrix tmp = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+		if (tmp) {
+			multiply_by_A(tmp, A_m, (poly_matrix) p);
+				// delta = u_first_poly - tmp_first_poly
+				poly tmp0 = poly_matrix_element(tmp, 1, 0, 0);
+				poly u0 = poly_matrix_element(u, PARAM_D, 0, 0);
+				poly delta = (poly)calloc(PARAM_N, sizeof(scalar));
+			if (delta) {
+				// delta = u0 - tmp0
+				memcpy(delta, u0, PARAM_N * sizeof(scalar));
+				sub_poly(delta, delta, tmp0, PARAM_N - 1);
+				// add delta to p_first_d
+				poly_matrix p_as_poly = (poly_matrix) p;
+				poly p_first = poly_matrix_element(p_as_poly, 1, 0, 0);
+				add_poly(p_first, p_first, delta, PARAM_N - 1);
+				freeze_poly(p_first, PARAM_N - 1);
+				free(delta);
+			} else {
+				fprintf(stderr, "[SAMPLER DIAG] failed to alloc delta\n"); fflush(stderr);
+			}
+			free(tmp);
+		} else {
+			fprintf(stderr, "[SAMPLER DIAG] failed to alloc tmp\n"); fflush(stderr);
+		}
+	}
+
+	/* Diagnostic: compute A * p (CRT) to see whether p already maps to the
+	 * desired target before the sampler attempts to adjust via TI·z. This
+	 * will help determine whether the issue is in p construction or in TI. */
+	if (getenv("ARITH_DEBUG")) {
+		poly_matrix ap = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+		if (ap) {
+			multiply_by_A(ap, A_m, (poly_matrix) p);
+			poly ap0 = poly_matrix_element(ap, 1, 0, 0);
+			for (int comp = 0; comp < LOG_R; ++comp) {
+				char tag[80];
+				snprintf(tag, sizeof(tag), "SAMPLE_Ap_comp_%d", comp);
+				dump_crt_component(ap0, LOG_R, comp, tag);
+			}
+			free(ap);
+		} else {
+			fprintf(stderr, "[SAMPLER DIAG] failed to alloc ap\n"); fflush(stderr);
+		}
+	}
 	
 	// v <- - h_inv * A_m * p (in the CRT domain)
 	double_scalar prod_coeffs[2*PARAM_N];
 	poly_matrix v = x; // store v at the beginning of x
 	double_poly prod = prod_coeffs;
+
+	/* Debug expected v pointer (set via sampler_debug_set_expected_v) */
+	static scalar *debug_expected_v = NULL;
+	static int debug_expected_v_set = 0;
+
 
 	scalar *zero_coeffs = malloc(PARAM_N * PARAM_D * sizeof(scalar));
 	poly_matrix zero = zero_coeffs;
@@ -583,19 +702,95 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 
 	multiply_by_A(v, A_m, (poly_matrix) p);
 
-	sub_poly(zero, zero, u, PARAM_N * PARAM_D - 1);
-	add_poly(v, v, zero, PARAM_N * PARAM_D - 1);	
-	
+	if (getenv("ARITH_DEBUG")) {
+		/* Dump v (first poly) and target u (first poly) in CRT for comparison */
+	poly v0 = poly_matrix_element(v, 1, 0, 0);
+	poly u0 = poly_matrix_element(u, PARAM_D, 0, 0);
+		for (int comp = 0; comp < LOG_R; ++comp) {
+			char tagv[80]; char tagu[80];
+			snprintf(tagv, sizeof(tagv), "SAMPLE_v_after_A_comp_%d", comp);
+			snprintf(tagu, sizeof(tagu), "SAMPLE_u_comp_%d", comp);
+			dump_crt_component(v0, LOG_R, comp, tagv);
+			dump_crt_component(u0, LOG_R, comp, tagu);
+		}
+	}
+
+	/* Compute v <- v - u directly in-place (both are in CRT domain). */
+	sub_poly(v, v, u, PARAM_N * PARAM_D - 1);
+
+	/* If KeyGen provided an expected A·omega_A, compare it to our v (CRT)
+	 * before any h_inv / canonicalization. This will fail-fast with a
+	 * focused dump to help pinpoint representation / ordering / aliasing bugs.
+	 */
+	if (getenv("ARITH_DEBUG") && sampler_debug_expected_v_set) {
+		for (int comp = 0; comp < PARAM_D; ++comp) {
+			poly v_i = poly_matrix_element(v, 1, comp, 0);
+			scalar *expect = &sampler_debug_expected_v[comp * PARAM_N];
+			for (int j = 0; j < PARAM_N; ++j) {
+				if (v_i[j] != expect[j]) {
+					/* Print focused mismatch and exit */
+					int idx = j;
+					uint32_t actual = v_i[idx];
+					uint32_t expv = expect[idx];
+					int32_t s_actual = (actual >= (1u<<31)) ? (int32_t)(actual - (1u<<32)) : (int32_t)actual;
+					int32_t s_exp = (expv >= (1u<<31)) ? (int32_t)(expv - (1u<<32)) : (int32_t)expv;
+					long long raw = (long long)actual - (long long)expv;
+					long long modq = (raw % PARAM_Q + PARAM_Q) % PARAM_Q;
+					fprintf(stderr, "[SAMPLER ASSERT] mismatch comp=%d coeff=%d: v(actual)=%u (s=%d) expected=%u (s=%d) raw_diff=%lld modQ=%lld\n",
+							comp, idx, actual, s_actual, expv, s_exp, raw, modq);
+					fflush(stderr);
+
+					/* Print first few coeffs for both arrays to help debugging */
+					int show = 8;
+					fprintf(stderr, "[SAMPLER ASSERT] actual v (comp %d) first %d: ", comp, show);
+					for (int k = 0; k < show && k < PARAM_N; ++k) {
+						uint32_t vkk = v_i[k];
+						int32_t sv = (vkk >= (1u<<31)) ? (int32_t)(vkk - (1u<<32)) : (int32_t)vkk;
+						fprintf(stderr, "%u(s=%d) ", vkk, sv);
+					}
+					fprintf(stderr, "\n");
+					fprintf(stderr, "[SAMPLER ASSERT] expected (comp %d) first %d: ", comp, show);
+					for (int k = 0; k < show && k < PARAM_N; ++k) {
+						uint32_t vkk = expect[k];
+						int32_t sv = (vkk >= (1u<<31)) ? (int32_t)(vkk - (1u<<32)) : (int32_t)vkk;
+						fprintf(stderr, "%u(s=%d) ", vkk, sv);
+					}
+					fprintf(stderr, "\n");
+					fflush(stderr);
+					exit(2);
+				}
+			}
+		}
+	}
+    
 	for(int i = 0 ; i < PARAM_D ; ++i)
 		{
 		poly v_i = poly_matrix_element(v, 1, i, 0);
-		
+
+		if (getenv("ARITH_DEBUG")) {
+			char tagb[80];
+			snprintf(tagb, sizeof(tagb), "SAMPLE_v_before_hinv_comp_%d", i);
+			for (int comp = 0; comp < LOG_R; ++comp) {
+				dump_crt_component(v_i, LOG_R, comp, tagb);
+			}
+		}
+        
 		mul_crt_poly(prod, h_inv, v_i, LOG_R);
 		reduce_double_crt_poly(v_i, prod, LOG_R);
-		for(int j = 0 ; j < PARAM_N ; ++j)
-			{
+		for (int j = 0; j < PARAM_N; ++j) {
+			/* Keep the same canonicalization as the non-target path:
+			 * reduce_double_crt_poly produced values in [0,q-1], so subtract
+			 * from q to get the correct representative. */
 			v_i[j] = PARAM_Q - v_i[j];
+		}
+
+		if (getenv("ARITH_DEBUG")) {
+			char taga[80];
+			snprintf(taga, sizeof(taga), "SAMPLE_v_after_hinv_comp_%d", i);
+			for (int comp = 0; comp < LOG_R; ++comp) {
+				dump_crt_component(v_i, LOG_R, comp, taga);
 			}
+		}
 		}
 
 	
@@ -628,4 +823,13 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	add_poly(x, x, (poly) p, PARAM_N * PARAM_M - 1);
 	// Reduce x mod q one final time but keep it in the CRT domain
 	freeze_poly(x, PARAM_N * PARAM_M - 1);
+
+	/* Debug: print pointer and first few coefficients of x (which should be the
+	 * caller's omega_A buffer). This helps detect aliasing/copy issues. */
+	if (getenv("ARITH_DEBUG")) {
+		poly x0 = poly_matrix_element(x, 1, 0, 0);
+		fprintf(stderr, "[SAMPLER PTR] x=%p first8_coeffs:", (void*)x);
+		for (int k = 0; k < 8 && k < PARAM_N; ++k) fprintf(stderr, " %u", x0[k]);
+		fprintf(stderr, "\n"); fflush(stderr);
+	}
 	}

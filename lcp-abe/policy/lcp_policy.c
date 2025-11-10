@@ -356,28 +356,26 @@ int lsss_compute_coefficients(const AccessPolicy *policy, const AttributeSet *at
     int is_or = (strstr(policy->expression, "OR") != NULL);
     
     if (is_or) {
-        // For OR policy: Use ALL policy rows where user has the attribute
-        // This allows proper reconstruction even if user has multiple matching attrs
-        *n_coeffs = 0;
+        // For OR policy: mark coefficients for policy rows where user has the attribute
+        // Important: we populate coefficients indexed by policy row so that the
+        // decryption code can iterate over policy rows (0..matrix_rows-1) and
+        // consult coefficients[i] directly. We return n_coeffs = matrix_rows so
+        // the decrypt loop processes all rows but only non-zero coefficients
+        // contribute. This avoids compacting the coefficients array and mismatching
+        // policy row indices with the returned count.
+        memset(coefficients, 0, policy->matrix_rows * sizeof(scalar));
         for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            // Get attribute index for this policy row
             uint32_t policy_attr_idx = policy->rho[i];
-            
-            // Check if user has this attribute
             for (uint32_t j = 0; j < attr_set->count; j++) {
                 if (attr_set->attrs[j].index == policy_attr_idx) {
-                    // Found matching attribute - use this row with coefficient 1
-                    coefficients[i] = 1;  // CRITICAL: Use index i, not *n_coeffs
-                    (*n_coeffs)++;
+                    coefficients[i] = 1;
                     printf("[LSSS] OR policy: Using policy row %d (attr idx %d) with coeff=1\n",
                            i, policy_attr_idx);
-                    break;  // Move to next policy row
+                    break;
                 }
             }
         }
-        if (*n_coeffs == 0) {
-            return -1;  // No matching attributes found
-        }
+        *n_coeffs = policy->matrix_rows;
         return 0;
     } else {
         // For AND policy: Must use ALL policy attributes
