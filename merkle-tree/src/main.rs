@@ -126,35 +126,40 @@ pub fn compute_root_proof(hashes: &[Hash]) -> Hash {
 // Verify proof
 pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> bool {
     let mut nodes: Vec<Hash> = ct_digest.to_vec();
+    let mut length = nodes.len(); 
     let mut proof_nodes: Vec<Hash> = proof.to_vec();
-    let mut proof_len = proof_nodes.len();
-    let mut length = nodes.len();
     let mut is_lowestpair = true;
     let mut pair_count = 0;
-
-    while length > 1 || proof_len > 1{
+    let mut tamper_rec: Vec<_> = Vec::new();
+    while length > 1{
         let mut i = 0;
         while i < length {
             // check wether nodes is in even to create pair or not
             let digest_left = &nodes[i];
             let digest_right = if i + 1 < length { &nodes[i + 1] } else { &nodes[i] };
 
-            let proof_left = &proof[i];
-            let proof_right = if i + 1 < length { &proof_nodes[i + 1] } else { &proof_nodes[i] };
-            // recompute merkle tree and proof with the ct_digest
-            nodes[i / 2] = *compute_hash_tree_branch(digest_left, digest_right);
-            proof_nodes[i / 2] = *compute_hash_tree_branch(proof_left, proof_right);
+            // the proof will re-compute after lowest pair is checked -> when pass the first
+            // itteration and length/2 which equal to proof size -> to get root
+            if !is_lowestpair {
+                let proof_left = &proof_nodes[i];
+                let proof_right = if i + 1 < length { &proof_nodes[i + 1] } else { &proof_nodes[i] };
+                proof_nodes[i / 2] = *compute_hash_tree_branch(proof_left, proof_right);
+            }
+            // recompute proof hash
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
-                print!("Verify digest pair with proof {} : " , pair_count);
+                // we compute and check hash digest with proof with only the lowest pair b/c our
+                // proof is in the lowest pair.
+                nodes[i / 2] = *compute_hash_tree_branch(digest_left, digest_right);
+                print!("Verify digest pair with proof {} : " , (pair_count + 1));
                 // compare i proof with new compute proof (from digest)
                 if proof[pair_count].as_bytes() == nodes[i / 2].as_bytes() {
                     println!("Valid");
                 }
                 else {
                     println!("Invalid");
-                    println!("The file got tamper in {}", pair_count);
-                    break;
+                    tamper_rec.push(pair_count + 1);
+                    // break;
                 }
                 pair_count += 1;
             }
@@ -162,12 +167,18 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
         }
         is_lowestpair = false; // turn lowest pair to false
         length = (length + 1) / 2;
-        proof_len = (proof_len + 1) / 2;
-        // check wether our proof is valid or not from the recomputed root
-        // the validity will shows when proof all pair is true and new compute root = previous root
+        // after 
         if length == 1{
             if root[0].as_bytes() == proof_nodes[0].as_bytes(){
                 println!("Verify proof: Valid");
+                if tamper_rec.len() > 1{
+                    print!("The digest that got tampered is in pair: ");
+                    let tamper_rec_len = tamper_rec.len();
+                    for i in 0..tamper_rec_len {
+                        print!("{}, ", tamper_rec[i]);
+                    }
+                    println!();
+                }
             }
             else {
                 println!("Verify proof : Invalid proof, proof got tamper!");
