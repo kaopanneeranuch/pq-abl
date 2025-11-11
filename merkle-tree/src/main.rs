@@ -128,8 +128,9 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
     let mut length = nodes.len();
     let mut is_lowestpair = true;
     let mut pair_count = 0;
+    let mut is_tamper = false;
 
-    while length > 1 {
+    while length > 1 && !is_tamper{
         let mut i = 0;
         while i < length {
             // check wether nodes is in even to create pair or not
@@ -139,13 +140,16 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
             nodes[i / 2] = *compute_hash_tree_branch(left, right);
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
-                print!("Verify digest pair with proof : {}" , pair_count);
+                print!("Verify digest pair with proof {} : " , pair_count);
                 // compare i proof with new compute proof (from digest)
                 if proof[pair_count].as_bytes() == nodes[i / 2].as_bytes() {
                     println!("Valid");
                 }
                 else {
                     println!("Invalid");
+                    is_tamper = true;
+                    println!("The file got tamper in {}", pair_count);
+                    break;
                 }
                 pair_count += 1;
             }
