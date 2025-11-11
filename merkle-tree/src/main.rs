@@ -123,21 +123,27 @@ pub fn compute_root_proof(hashes: &[Hash]) -> Hash {
     nodes[0].clone()
 }
 
+// Verify proof
 pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> bool {
     let mut nodes: Vec<Hash> = ct_digest.to_vec();
+    let mut proof_nodes: Vec<Hash> = proof.to_vec();
+    let mut proof_len = proof_nodes.len();
     let mut length = nodes.len();
     let mut is_lowestpair = true;
     let mut pair_count = 0;
-    let mut is_tamper = false;
 
-    while length > 1 && !is_tamper{
+    while length > 1 || proof_len > 1{
         let mut i = 0;
         while i < length {
             // check wether nodes is in even to create pair or not
-            let left = &nodes[i];
-            let right = if i + 1 < length { &nodes[i + 1] } else { &nodes[i] };
+            let digest_left = &nodes[i];
+            let digest_right = if i + 1 < length { &nodes[i + 1] } else { &nodes[i] };
+
+            let proof_left = &proof[i];
+            let proof_right = if i + 1 < length { &proof_nodes[i + 1] } else { &proof_nodes[i] };
             // recompute merkle tree and proof with the ct_digest
-            nodes[i / 2] = *compute_hash_tree_branch(left, right);
+            nodes[i / 2] = *compute_hash_tree_branch(digest_left, digest_right);
+            proof_nodes[i / 2] = *compute_hash_tree_branch(proof_left, proof_right);
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
                 print!("Verify digest pair with proof {} : " , pair_count);
@@ -147,7 +153,6 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
                 }
                 else {
                     println!("Invalid");
-                    is_tamper = true;
                     println!("The file got tamper in {}", pair_count);
                     break;
                 }
@@ -157,14 +162,15 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
         }
         is_lowestpair = false; // turn lowest pair to false
         length = (length + 1) / 2;
+        proof_len = (proof_len + 1) / 2;
         // check wether our proof is valid or not from the recomputed root
         // the validity will shows when proof all pair is true and new compute root = previous root
         if length == 1{
-            if root[0].as_bytes() == nodes[0].as_bytes() {
-                println!("Verify root : Valid");
+            if root[0].as_bytes() == proof_nodes[0].as_bytes(){
+                println!("Verify proof: Valid");
             }
             else {
-                println!("Verify root : Invalid");
+                println!("Verify proof : Invalid proof, proof got tamper!");
             }
         }
     }
