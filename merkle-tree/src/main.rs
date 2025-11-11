@@ -123,8 +123,8 @@ pub fn compute_root_proof(hashes: &[Hash]) -> Hash {
     nodes[0].clone()
 }
 
-pub fn verify_proof_root(hashes: &[Hash], proof: &[Hash], root: &[Hash]) -> bool {
-    let mut nodes: Vec<Hash> = hashes.to_vec();
+pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> bool {
+    let mut nodes: Vec<Hash> = ct_digest.to_vec();
     let mut length = nodes.len();
     let mut is_lowestpair = true;
     let mut pair_count = 0;
@@ -132,26 +132,36 @@ pub fn verify_proof_root(hashes: &[Hash], proof: &[Hash], root: &[Hash]) -> bool
     while length > 1 {
         let mut i = 0;
         while i < length {
+            // check wether nodes is in even to create pair or not
             let left = &nodes[i];
-            // println!("Left node: {:?}", left);
             let right = if i + 1 < length { &nodes[i + 1] } else { &nodes[i] };
-            // println!("Right node: {:?}", right);
+            // recompute merkle tree and proof with the ct_digest
             nodes[i / 2] = *compute_hash_tree_branch(left, right);
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
-                println!("Verify digest pair : {}" , pair_count);
-                // println!("Proof: {:?}", proof[pair_count]);
-                // println!("Digest Proof: {:?}", nodes[i/2]);
-                println!("{}", (proof[pair_count].as_bytes() == nodes[i / 2].as_bytes()));
+                print!("Verify digest pair with proof : {}" , pair_count);
+                // compare i proof with new compute proof (from digest)
+                if proof[pair_count].as_bytes() == nodes[i / 2].as_bytes() {
+                    println!("Valid");
+                }
+                else {
+                    println!("Invalid");
+                }
                 pair_count += 1;
             }
-            // println!();
             i += 2;
         }
         is_lowestpair = false; // turn lowest pair to false
         length = (length + 1) / 2;
+        // check wether our proof is valid or not from the recomputed root
+        // the validity will shows when proof all pair is true and new compute root = previous root
         if length == 1{
-            println!("Verify root : {}", (root[0].as_bytes() == nodes[0].as_bytes()));
+            if root[0].as_bytes() == nodes[0].as_bytes() {
+                println!("Verify root : Valid");
+            }
+            else {
+                println!("Verify root : Invalid");
+            }
         }
     }
     return true;
