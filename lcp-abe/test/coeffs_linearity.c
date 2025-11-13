@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
+#include "module_gaussian_lattice/Module_BFRS/sampling.h"
 
 int main()
 {

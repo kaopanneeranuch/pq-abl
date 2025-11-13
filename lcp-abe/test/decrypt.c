@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <inttypes.h>
 #include <dirent.h>
 #include <string.h>
 #include "lcp-abe/common/lcp_types.h"
@@ -8,6 +9,9 @@
 #include "lcp-abe/keygen/lcp_keygen.h"
 #include "lcp-abe/decrypt/lcp_decrypt.h"
 #include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 int main(int argc, char *argv[]) {
     // Initialize Module_BFRS components (required for polynomial operations)
@@ -15,7 +19,7 @@ int main(int argc, char *argv[]) {
     printf("[Init] Initializing Module_BFRS...\n");
     init_crt_trees();
     init_cplx_roots_of_unity();
-    init_D_lattice_coeffs();
+    /* init_D_lattice_coeffs() removed/absent in Module_BFRS - skip it */
     
     // Load MPK and user secret key
     printf("[Init] Loading keys...\n");
@@ -34,8 +38,12 @@ int main(int argc, char *argv[]) {
     }
     printf("[Init] Loaded SK (attributes: %d)\n", sk.attr_set.count);
     
-    // Create output directory
+    // Create output directory (cross-platform)
+#ifdef _WIN32
+    _mkdir("out/decrypted");
+#else
     mkdir("out/decrypted", 0755);
+#endif
     
     char *ctobj_files[1000];
     uint32_t n_files = 0;

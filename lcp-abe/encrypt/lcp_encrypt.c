@@ -9,24 +9,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
-
-/*
- * Phase 3: Log Encryption and Submission (Optimized for Batch and Asynchronous Commit)
- * 
- * This implementation follows the hybrid encryption design described in the paper:
- * 
- * Step 1: Symmetric Encryption - Each log gets AES-GCM encryption with unique K_log
- * Step 2: Batch ABE Encapsulation - Logs sharing same policy W are batched together
- *         - One ABE encryption per (policy, epoch) batch creates shared CT_ABE structure
- *         - C0 and C[i] components can be reused across all logs in batch
- *         - Each log still has unique K_log for content-level isolation
- * Step 3: Log Object Construction - CT_obj = {CT_sym, CT_ABE^(n), meta}
- * Step 4: Asynchronous Blockchain Anchoring - Microbatch {h_i, CID_i} per interval δ_t
- * 
- * Optimization: Batching amortizes heavy lattice operations (C0, C[i] computation)
- * over N logs, reducing per-log cost from O(1) to O(1/N) for ABE operations.
- * Current implementation: Each log gets full ABE encryption (TODO: optimize to reuse components)
- */
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 // ============================================================================
 // Batch-Optimized LCP-ABE Encryption (O(1/N) optimization)
@@ -61,7 +46,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     uint32_t n_rows = policy->matrix_rows;
     printf("[Batch Init]   Policy has %d rows in LSSS matrix\n", n_rows);
     
-    // Allocate ciphertext components
     ct_abe_template->C0 = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     ct_abe_template->C = (poly_matrix*)calloc(n_rows, sizeof(poly_matrix));
     ct_abe_template->n_components = n_rows;  // CRITICAL: Set n_components
@@ -79,9 +63,7 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         }
     }
     
-    // Note: ct_key is NOT allocated here - it's per-log unique
-    
-    // Sample random secret vector s ∈ R_q^k (SHARED across batch)
+
     printf("[Batch Init]   Sampling shared secret vector s\n");
     poly_matrix s = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     if (!s) {
@@ -94,23 +76,7 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         s[i] += PARAM_Q;
     }
     matrix_crt_representation(s, PARAM_D, 1, LOG_R);
-    
-    // For Module-LWE CP-ABE: We don't need LSSS shares in the lattice part!
-    // The policy satisfaction is handled by which user attributes match B[ρ(i)]
-    // The reconstruction coefficients from LSSS are used to combine the ω[i] components
-    // 
-    // We DO need shares for proper CP-ABE, but they should be shares of a SECRET
-    // that gets RECOVERED during decryption via LSSS reconstruction.
-    // 
-    // The correct secret to share: s[0] (first coefficient of first polynomial)
-    // This will be reconstructed as: Σ(coeff[i] · shares[i]) = s[0]
-    // 
-    // However, in the current architecture, we need shares to NOT interfere with
-    // the decryption term. The cleanest approach: use shares to protect K_log directly!
-    //
-    // NEW APPROACH: Generate LSSS shares of ZERO (so they don't interfere)
-    // This makes C[i] = B[ρ(i)]^T · s + e[i] (clean lattice CP-ABE)
-    // The policy checking is done via which attributes match
+
     
     scalar secret_scalar = 0;  // Share secret = 0 (shares won't interfere with decryption)
     scalar *shares = (scalar*)calloc(n_rows, sizeof(scalar));
@@ -132,14 +98,18 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         return -1;
     }
     
-    SampleR_matrix_centered((signed_poly_matrix)e0, PARAM_M, 1, PARAM_SIGMA);
+    printf("[Batch Init] Sampling e0[0] with reduced sigma (0.5×) for decryption robustness\n");
+    SampleR_centered((signed_poly)&e0[0 * PARAM_N], 0.5 * PARAM_SIGMA);
+    
+    for (uint32_t i = 1; i < PARAM_M; i++) {
+        SampleR_centered((signed_poly)&e0[i * PARAM_N], PARAM_SIGMA);
+    }
+    
     for (int i = 0; i < PARAM_N * PARAM_M; i++) {
         e0[i] += PARAM_Q;
     }
     matrix_crt_representation(e0, PARAM_M, 1, LOG_R);
     
-    // Compute C0 = A^T · s + e0 (where A is M x D)
-    // A^T is D x M, so A^T · s gives M x 1 result
     poly_matrix A_T_s = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     if (!A_T_s) {
         fprintf(stderr, "[Batch Init] ERROR: Failed to allocate A_T_s\n");
@@ -149,30 +119,17 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         return -1;
     }
     
-    // Compute A^T · s where A = [I_d | Ā]
-    // A is D×M with implicit identity in first D columns
-    // mpk->A stores only Ā (the D×(M-D) part)
-    // Result: C0 = A^T · s = [s; Ā^T · s] where:
-    //   - First D components = s (from identity part)
-    //   - Last (M-D) components = Ā^T · s (from stored part)
-    
-    // Copy s to first D components (identity contribution)
+
     for (uint32_t i = 0; i < PARAM_D; i++) {
         poly result_i = poly_matrix_element(A_T_s, 1, i, 0);
         poly s_i = poly_matrix_element(s, 1, i, 0);
         memcpy(result_i, s_i, PARAM_N * sizeof(scalar));
     }
     
-    // Compute Ā^T · s for last (M-D) components
-    // Ā is D×(M-D), so Ā^T is (M-D)×D
-    // For each row i of Ā^T (= column i of Ā):
     for (uint32_t i = 0; i < PARAM_M - PARAM_D; i++) {
         poly result_i = poly_matrix_element(A_T_s, 1, i + PARAM_D, 0);
         
-        // Dot product of row i of Ā^T with s
-        // Row i of Ā^T = column i of Ā
         for (uint32_t j = 0; j < PARAM_D; j++) {
-            // Ā[j][i] = row j, column i of stored matrix
             poly A_ji = poly_matrix_element(mpk->A, PARAM_M - PARAM_D, j, i);
             poly s_j = poly_matrix_element(s, 1, j, 0);
             
@@ -189,9 +146,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         }
     }
     
-    // C0 = A^T · s + e0
-    /* Diagnostic mapping: print A_T_s element addresses and first4 BEFORE copy
-     * so we can correlate A_T_s entries with resulting C0 entries after memcpy. */
     if (getenv("ARITH_DEBUG")) {
         for (uint32_t _i = 0; _i < 16 && _i < PARAM_M; _i++) {
             poly a_ts_elem = poly_matrix_element(A_T_s, 1, _i, 0);
@@ -202,7 +156,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     memcpy(ct_abe_template->C0, A_T_s, PARAM_M * PARAM_N * sizeof(scalar));
     add_poly(ct_abe_template->C0, ct_abe_template->C0, e0, PARAM_N * PARAM_M - 1);
     
-    // DIAGNOSTIC: print addresses and first coefficients of first few C0 polynomials
     if (getenv("ARITH_DEBUG")) {
         for (uint32_t _i = 0; _i < 6 && _i < PARAM_M; _i++) {
             poly c0_i = poly_matrix_element(ct_abe_template->C0, 1, _i, 0);
@@ -213,9 +166,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
 
     free(A_T_s);
 
-    /* Diagnostic: dump A_T_s polynomials (CRT components) and the s_j polynomials
-     * so we can compare A^T·s and the s vector with the decryption-side C0.
-     */
     if (getenv("ARITH_DEBUG")) {
         for (uint32_t ii = 0; ii < PARAM_D; ii++) {
             poly s_i = poly_matrix_element(s, 1, ii, 0);
@@ -224,7 +174,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
                 snprintf(tags, sizeof(tags), "ENCRYPT_s_poly_%u_comp_%d", ii, comp);
                 dump_crt_component(s_i, LOG_R, comp, tags);
             }
-            /* Also dump full coefficient representation for s_i */
             poly s_i_copy = (poly)calloc(PARAM_N, sizeof(scalar));
             if (s_i_copy) {
                 memcpy(s_i_copy, s_i, PARAM_N * sizeof(scalar));
@@ -243,10 +192,8 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
                 snprintf(taga, sizeof(taga), "ENCRYPT_A_T_s_poly_%u_comp_%d", ii, comp);
                 dump_crt_component(a_ts_i, LOG_R, comp, taga);
             }
-            /* Also print first coefficients for quick pointer/first4 comparison */
             printf("[ENCRYPT DIAG] A_T_s poly %u first4=%u %u %u %u ptr=%p\n",
                    ii, a_ts_i[0], a_ts_i[1], a_ts_i[2], a_ts_i[3], (void*)a_ts_i);
-            /* Dump full coefficient representation for A_T_s poly (limited to first 8 polynomials) */
             poly a_ts_copy = (poly)calloc(PARAM_N, sizeof(scalar));
             if (a_ts_copy) {
                 memcpy(a_ts_copy, a_ts_i, PARAM_N * sizeof(scalar));
@@ -259,7 +206,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         }
     }
     
-    // Compute C[i] for each policy row (SHARED)
     printf("[Batch Init]   Computing shared C[i] components\n");
     for (uint32_t i = 0; i < n_rows; i++) {
         uint32_t attr_idx = policy->rho[i];
@@ -274,7 +220,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         
         poly_matrix B_plus_attr = &mpk->B_plus[attr_idx * PARAM_M * PARAM_N];
         
-        // Sample error e_i
         poly_matrix e_i = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
         if (!e_i) {
             fprintf(stderr, "[Batch Init] ERROR: Failed to allocate e_i\n");
@@ -289,10 +234,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
             e_i[j] += PARAM_Q;
         }
         matrix_crt_representation(e_i, PARAM_M, 1, LOG_R);
-        
-        // Compute C[i] = B[ρ(i)] · s[0] + e[i]
-        // Clean lattice CP-ABE: NO LSSS share mixing
-        // Policy satisfaction is handled by attribute matching in decryption
         
         double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
@@ -310,13 +251,11 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         
         poly s_0 = poly_matrix_element(s, 1, 0, 0);
         
-        // For each of the M polynomials in C[i]
         for (uint32_t j = 0; j < PARAM_M; j++) {
             poly c_i_j = poly_matrix_element(ct_abe_template->C[i], 1, j, 0);
             poly e_i_j = poly_matrix_element(e_i, 1, j, 0);
             poly B_j = &B_plus_attr[j * PARAM_N];
             
-            // C[i][j] = B[j] · s[0] + e[i][j]
             mul_crt_poly(temp_prod, B_j, s_0, LOG_R);
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
             add_poly(c_i_j, reduced, e_i_j, PARAM_N - 1);
@@ -329,7 +268,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         free(e_i);
     }
     
-    // DIAGNOSTIC: dump first few C[i] polynomials (template)
     if (getenv("ARITH_DEBUG")) {
         for (uint32_t _i = 0; _i < 3 && _i < n_rows; _i++) {
             for (uint32_t _j = 0; _j < 4 && _j < PARAM_M; _j++) {
@@ -343,7 +281,6 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
     free(e0);
     free(shares);
     
-    // Return s for per-log encryption
     *s_out = s;
     
     printf("[Batch Init] Shared components ready (C0, C[i] can be reused for all logs)\n");
@@ -357,20 +294,17 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
                               ABECiphertext *ct_abe) {
     printf("[Batch Key] Encrypting unique K_log using shared secret s\n");
     
-    // Initialize this log's ciphertext
     abe_ct_init(ct_abe);
     ct_abe->policy = ct_abe_template->policy;
     ct_abe->n_components = ct_abe_template->n_components;
     
-    // DEEP COPY shared components from template (each log needs its own copy for serialization)
     printf("[Batch Key]   Deep copying shared C0 (%d scalars)\n", PARAM_M * PARAM_N);
     ct_abe->C0 = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     if (!ct_abe->C0) {
         fprintf(stderr, "[Batch Key] ERROR: Failed to allocate C0\n");
         return -1;
     }
-    memcpy(ct_abe->C0, ct_abe_template->C0, PARAM_M * PARAM_N * sizeof(scalar));
-    // DIAGNOSTIC: print addresses and first coefficients of first few C0 polynomials (deep-copied)
+    memcpy(ct_abe->C0, ct_abe_template->C0, PARAM_M * PARAM_N * sizeof(scalar));    
     if (getenv("ARITH_DEBUG")) {
         for (uint32_t _i = 0; _i < 6 && _i < PARAM_M; _i++) {
             poly c0_i = poly_matrix_element(ct_abe->C0, 1, _i, 0);
@@ -379,7 +313,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         }
     }
     
-    // Deep copy C array
     uint32_t n_rows = ct_abe_template->policy.matrix_rows;
     printf("[Batch Key]   Deep copying shared C array (%d components)\n", n_rows);
     ct_abe->C = (poly_matrix*)calloc(n_rows, sizeof(poly_matrix));
@@ -403,7 +336,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         memcpy(ct_abe->C[i], ct_abe_template->C[i], PARAM_M * PARAM_N * sizeof(scalar));
     }
 
-    // DIAGNOSTIC: dump first few C[i] polynomials after deep-copy (per-log)
     if (getenv("ARITH_DEBUG")) {
         for (uint32_t _i = 0; _i < 3 && _i < n_rows; _i++) {
             for (uint32_t _j = 0; _j < 4 && _j < PARAM_M; _j++) {
@@ -414,7 +346,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         }
     }
     
-    // Allocate UNIQUE ct_key for this log
     ct_abe->ct_key = (poly)calloc(PARAM_N, sizeof(scalar));
     if (!ct_abe->ct_key) {
         fprintf(stderr, "[Batch Key] ERROR: Failed to allocate ct_key\n");
@@ -426,8 +357,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         return -1;
     }
     
-    // Compute ct_key = β · s + e_key + encode(K_log)
-    // This is the ONLY unique computation per log
     poly e_key = (poly)calloc(PARAM_N, sizeof(scalar));
     if (!e_key) {
         fprintf(stderr, "[Batch Key] ERROR: Failed to allocate e_key\n");
@@ -443,7 +372,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     
     memcpy(ct_abe->ct_key, e_key, PARAM_N * sizeof(scalar));
     
-    // Add β · s_0 (reusing shared s)
     double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
     poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
     
@@ -458,7 +386,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     
     poly s_0 = poly_matrix_element(s, 1, 0, 0);
     printf("[Batch Key] DEBUG: mul operands addresses: mpk->beta=%p s_0=%p temp_prod=%p\n", (void*)mpk->beta, (void*)s_0, (void*)temp_prod);
-    /* Diagnostic: dump mpk->beta and s_0 CRT components before multiplication */
     if (getenv("ARITH_DEBUG")) {
         for (int comp = 0; comp < LOG_R; comp++) {
             char tb[80];
@@ -470,9 +397,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         }
     }
     mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
-    /* Diagnostic: when ARITH_DEBUG is set, dump each reduced CRT component
-     * for the freshly computed double_poly 'temp_prod'. This helps compare
-     * encryption-side reduced components with decryption-side accumulators. */
     if (getenv("ARITH_DEBUG")) {
         for (int comp = 0; comp < LOG_R; comp++) {
             char tag[64];
@@ -481,8 +405,6 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         }
     }
     reduce_double_crt_poly(reduced, temp_prod, LOG_R);
-    /* Diagnostic: dump the reduced CRT components for beta*s_0 so they can be
-     * compared directly with decryption-side per-term reduced products. */
     if (getenv("ARITH_DEBUG")) {
         for (int comp = 0; comp < LOG_R; comp++) {
             char tagr[80];
@@ -495,23 +417,19 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     free(temp_prod);
     free(reduced);
     
-    // DEBUG: Show K_log being encoded
     printf("[Batch Key] DEBUG: Encoding K_log (first 8 bytes): ");
     for (int i = 0; i < 8 && i < AES_KEY_SIZE; i++) {
         printf("%02x ", key[i]);
     }
     printf("\n");
     
-    // Encode K_log into ct_key (convert to coefficient domain)
     coeffs_representation(ct_abe->ct_key, LOG_R);
 
-    // EXTRA DEBUG: print beta*s_0 (coeff domain) to compare with decryption term
     double_poly tmp_prod2 = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
     poly reduced_beta = (poly)calloc(PARAM_N, sizeof(scalar));
     if (tmp_prod2 && reduced_beta) {
         printf("[Batch Key] DEBUG: (second) mul operands addresses: mpk->beta=%p s_0=%p tmp_prod2=%p\n", (void*)mpk->beta, (void*)s_0, (void*)tmp_prod2);
         mul_crt_poly(tmp_prod2, mpk->beta, s_0, LOG_R);
-        /* Diagnostic: dump reduced CRT components for this second mul as well */
         if (getenv("ARITH_DEBUG")) {
             for (int comp = 0; comp < LOG_R; comp++) {
                 char tag2[64];
@@ -530,14 +448,22 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         coeffs_representation(reduced_beta, LOG_R);
         printf("[Batch Key] DEBUG: beta*s0 (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
                reduced_beta[0], reduced_beta[1], reduced_beta[2], reduced_beta[3]);
+        
+        printf("[ENCRYPT NOISE DIAG] β·s[0] (COEFF, full):");
+        for (int i = 0; i < PARAM_N; i++) {
+            printf(" %u", reduced_beta[i]);
+        }
+        printf("\n");
+        
+        uint32_t max_beta_s0 = 0;
+        for (int i = 0; i < PARAM_N; i++) {
+            if (reduced_beta[i] > max_beta_s0) max_beta_s0 = reduced_beta[i];
+        }
+        printf("[ENCRYPT NOISE DIAG] β·s[0] max coefficient: %u (0x%x)\n", max_beta_s0, max_beta_s0);
 
-        /* CRT <-> COEFF round-trip diagnostic (in-place conversions are used)
-         * Copy coefficient representation, convert to CRT and back, then compare.
-         * This is a lightweight check to detect conversion asymmetry. */
         poly tmp_round = (poly)calloc(PARAM_N, sizeof(scalar));
         if (tmp_round) {
-            memcpy(tmp_round, reduced_beta, PARAM_N * sizeof(scalar));
-            /* tmp_round is COEFF -> convert to CRT -> convert back to COEFF */
+            memcpy(tmp_round, reduced_beta, PARAM_N * sizeof(scalar));  
             crt_representation(tmp_round, LOG_R);
             coeffs_representation(tmp_round, LOG_R);
 
@@ -562,23 +488,25 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     printf("[Batch Key] DEBUG: ct_key before K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
-    // Encode K_log into high-order bits using bit-shift scaling
-    // Scale by 2^(PARAM_K - 8) to place K_log in upper 8 bits
-    // This maximizes noise tolerance for LWE decryption
-    const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
-    /* Prepare an explicit encoded K_log coefficient vector for diagnostics.
-     * encoded_Kvec[i] holds the exact value added to ct_key[i] for i < AES_KEY_SIZE
-     * (and 0 elsewhere). We will optionally dump this so we can compare the
-     * expected encoded vector with what decryption recovers after subtraction. */
+    const uint32_t shift = PARAM_K - 8;
+    const uint32_t redundancy = 3;
+    const uint32_t spacing = 16;
+    
     uint32_t encoded_Kvec[PARAM_N];
     for (int _i = 0; _i < PARAM_N; _i++) encoded_Kvec[_i] = 0;
+    
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        // Encode K_log in upper bits: multiply by 2^shift
         uint64_t encoded = (uint64_t)key[i] << shift;
-        encoded_Kvec[i] = (uint32_t)(encoded % PARAM_Q);
-        // Add to ct_key (LWE noise term) and reduce mod Q
-        uint64_t sum = (uint64_t)ct_abe->ct_key[i] + encoded;
-        ct_abe->ct_key[i] = (uint32_t)(sum % PARAM_Q);
+        uint32_t encoded_val = (uint32_t)(encoded % PARAM_Q);
+        
+        for (uint32_t rep = 0; rep < redundancy; rep++) {
+            uint32_t pos = i + rep * spacing;
+            if (pos >= PARAM_N) break;
+            
+            encoded_Kvec[pos] = encoded_val;
+            uint64_t sum = (uint64_t)ct_abe->ct_key[pos] + encoded;
+            ct_abe->ct_key[pos] = (uint32_t)(sum % PARAM_Q);
+        }
     }
 
     if (getenv("ARITH_DUMP_FULL")) {
@@ -592,21 +520,13 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     printf("[Batch Key] DEBUG: Encoded values in HEX: [0]=0x%08x, [1]=0x%08x, [2]=0x%08x, [3]=0x%08x\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
-    // DO NOT convert back to CRT - ct_key must stay in COEFFICIENT domain
-    // because decryption expects it in coefficient domain
-    // (decryption converts from CRT to COEFF, but we're already in COEFF after encoding)
-    
     printf("[Batch Key] DEBUG: ct_key stays in COEFF domain (first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
-    /* Optional full COEFF dump for exact-data comparison with decryption */
     if (getenv("ARITH_DUMP_FULL")) {
         printf("[ENCRYPT DUMP FULL] ct_key_coeff_full:\n");
         for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", ct_abe->ct_key[_i]);
         printf("\n");
     }
-    /* Minimal provenance mode: print ct_key pointer and compact FNV64 hash so
-     * we can correlate encryption-side ct_key with decryption-side observations
-     * without producing very large logs. Controlled by ARITH_MIN_PROV. */
     if (getenv("ARITH_MIN_PROV")) {
         uint64_t fnv_enc = 1469598103934665603ULL;
         for (int _i = 0; _i < PARAM_N; _i++) {
@@ -635,13 +555,11 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
                          SymmetricCiphertext *ct_sym) {
     printf("[AES-GCM] DEBUG: Entry - log_len=%zu\n", log_len);
 
-    // Sanity-check log_len to avoid acting on corrupted length fields
     if (log_len == 0 || log_len > 10 * 1024 * 1024) { /* 10 MB upper bound */
         fprintf(stderr, "[AES-GCM] ERROR: suspicious log_len=%zu\n", log_len);
         return -1;
     }
 
-    // Allocate ciphertext buffer
     printf("[AES-GCM] DEBUG: Allocating ciphertext buffer (%zu bytes)\n", log_len);
     ct_sym->ciphertext = (uint8_t*)malloc(log_len);
     if (!ct_sym->ciphertext) {
@@ -652,11 +570,9 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
     
     ct_sym->ct_len = log_len;
     
-    // Copy nonce
     memcpy(ct_sym->nonce, nonce, AES_NONCE_SIZE);
     printf("[AES-GCM] DEBUG: Nonce copied\n");
     
-    // Prepare AAD (additional authenticated data) from metadata
     uint8_t aad[512];
     size_t aad_len = snprintf((char*)aad, sizeof(aad),
                              "%s|%s|%s|%s|%s",
@@ -677,7 +593,6 @@ int encrypt_log_symmetric(const uint8_t *log_data, size_t log_len,
     }
     printf("\n");
     
-    // Encrypt with AES-GCM
     printf("[AES-GCM] DEBUG: Calling aes_gcm_encrypt\n");
     int result = aes_gcm_encrypt(log_data, log_len, key, nonce,
                                 aad, aad_len,
@@ -857,13 +772,11 @@ int encrypt_microbatch(const JsonLogEntry *logs,
             printf("[Microbatch]     Log %d/%d: Incremental cost (only ct_key, reused C0/C[i])\n\n", i + 1, n_logs);
         }
     }
-    
-    // Cleanup
+
     free(s_shared);
     
-    // Calculate optimization statistics
     double full_cost = 100.0;
-    double incremental_cost = 20.0; // Only ct_key computation
+    double incremental_cost = 20.0; 
     double avg_cost_per_log = (full_cost + (n_logs - 1) * incremental_cost) / n_logs;
     double savings = 100.0 - avg_cost_per_log;
     
@@ -884,12 +797,9 @@ int process_logs_microbatch(const JsonLogArray *logs,
     printf("[Process] Processing %d logs with %d policies...\n", logs->count, n_policies);
     
     // Group logs by epoch and policy
-    // Simplified: allocate max possible batches
     *batches = (Microbatch*)calloc(logs->count, sizeof(Microbatch));
     *n_batches = 0;
     
-    // For each epoch
-    // Find unique epochs
     uint64_t epochs[1000];
     uint32_t n_epochs = 0;
     
@@ -897,7 +807,6 @@ int process_logs_microbatch(const JsonLogArray *logs,
         uint64_t ts = parse_timestamp(logs->entries[i].timestamp);
         uint64_t epoch = get_epoch_id(ts);
         
-        // Check if epoch already seen
         int found = 0;
         for (uint32_t j = 0; j < n_epochs; j++) {
             if (epochs[j] == epoch) {
@@ -913,10 +822,8 @@ int process_logs_microbatch(const JsonLogArray *logs,
     
     printf("[Process] Found %d unique epochs\n", n_epochs);
     
-    // For each epoch and policy combination
     for (uint32_t e = 0; e < n_epochs; e++) {
         for (uint32_t p = 0; p < n_policies; p++) {
-            // Find logs matching this epoch and policy
             JsonLogEntry matching_logs[1000];
             uint32_t n_matching = 0;
             
@@ -955,11 +862,18 @@ int process_logs_microbatch(const JsonLogArray *logs,
 // ============================================================================
 
 int save_encrypted_batch(const Microbatch *batch, const char *output_dir) {
-    // Create output directory if needed
+    // Create output directory if needed (cross-platform)
+#ifdef _WIN32
+    if (_mkdir(output_dir) != 0 && errno != EEXIST) {
+        fprintf(stderr, "[Save] ERROR: Failed to create directory %s (errno=%d)\n", output_dir, errno);
+        return -1;
+    }
+#else
     if (mkdir(output_dir, 0755) != 0 && errno != EEXIST) {
         fprintf(stderr, "[Save] ERROR: Failed to create directory %s (errno=%d)\n", output_dir, errno);
         return -1;
     }
+#endif
     
     // Save each CT_obj as a separate file
     for (uint32_t i = 0; i < batch->n_logs; i++) {

@@ -38,7 +38,6 @@ typedef struct {
     uint32_t is_threshold;             // Flag: 1 if threshold policy, 0 otherwise
 } AccessPolicy;
 
-// Master Public Key (MPK) - Paper's Algorithm 1
 typedef struct {
     poly_matrix A;                     // Public random matrix A ∈ R_q^(k×m) where k=PARAM_D, m=PARAM_M
     poly_matrix B_plus;                // B+_i vectors: n_attributes × m matrix (stored as rows)
@@ -49,14 +48,12 @@ typedef struct {
     uint32_t m;                        // Module dimension m (= PARAM_M)
 } MasterPublicKey;
 
-// Master Secret Key (MSK) - Paper's Algorithm 1
 typedef struct {
     poly_matrix T;                     // Trapdoor TA for matrix A (2k × m in Module_BFRS)
     cplx_poly_matrix cplx_T;          // Complex representation of T (for Gaussian sampling)
     cplx_poly_matrix sch_comp;        // Schur complement (for Gaussian sampling)
 } MasterSecretKey;
 
-// User Secret Key (SK_Y for attribute set Y) - Paper's Algorithm 2
 typedef struct {
     AttributeSet attr_set;             // Set of attributes Y
     poly_matrix omega_A;               // ωA ∈ R^m (m-dimensional vector)
@@ -64,7 +61,6 @@ typedef struct {
     uint32_t n_components;             // Number of attributes in Y
 } UserSecretKey;
 
-// ABE Ciphertext (CT_ABE)
 typedef struct {
     AccessPolicy policy;               // Access policy W
     poly_matrix C0;                    // C0 = A^T · s + e_0
@@ -77,7 +73,6 @@ typedef struct {
 // Logging and Encryption Types
 // ============================================================================
 
-// Log metadata
 typedef struct {
     char timestamp[32];
     char user_id[64];
@@ -90,7 +85,6 @@ typedef struct {
     char region[32];
 } LogMetadata;
 
-// Symmetric encryption result
 typedef struct {
     uint8_t *ciphertext;               // AES-GCM ciphertext
     uint32_t ct_len;
@@ -98,7 +92,6 @@ typedef struct {
     uint8_t tag[AES_TAG_SIZE];
 } SymmetricCiphertext;
 
-// Complete encrypted log object (CT_obj)
 typedef struct {
     SymmetricCiphertext ct_sym;        // AES-GCM encrypted log data
     ABECiphertext ct_abe;              // LCP-ABE encrypted K_log
@@ -106,7 +99,6 @@ typedef struct {
     uint8_t hash[SHA3_DIGEST_SIZE];    // SHA3-256(CT_obj)
 } EncryptedLogObject;
 
-// Microbatch structure (logs with same policy in same epoch)
 typedef struct {
     AccessPolicy policy;               // Shared access policy W
     ABECiphertext shared_ct_abe;       // Shared ABE ciphertext structure
@@ -121,17 +113,14 @@ typedef struct {
 // Helper Functions
 // ============================================================================
 
-// Attribute functions
 void attribute_init(Attribute *attr, const char *name, uint32_t index);
 void attribute_set_init(AttributeSet *set);
 void attribute_set_add(AttributeSet *set, const Attribute *attr);
 bool attribute_set_contains(const AttributeSet *set, const char *name);
 
-// Policy functions
 void policy_init(AccessPolicy *policy);
 void policy_free(AccessPolicy *policy);
 
-// Key functions
 void mpk_init(MasterPublicKey *mpk, uint32_t n_attributes);
 void mpk_free(MasterPublicKey *mpk);
 void msk_init(MasterSecretKey *msk);
@@ -139,7 +128,6 @@ void msk_free(MasterSecretKey *msk);
 void usk_init(UserSecretKey *usk, uint32_t n_components);
 void usk_free(UserSecretKey *usk);
 
-// Ciphertext functions
 void abe_ct_init(ABECiphertext *ct);
 void abe_ct_free(ABECiphertext *ct);
 void sym_ct_init(SymmetricCiphertext *ct);
@@ -147,7 +135,6 @@ void sym_ct_free(SymmetricCiphertext *ct);
 void encrypted_log_init(EncryptedLogObject *obj);
 void encrypted_log_free(EncryptedLogObject *obj);
 
-// Microbatch functions
 void microbatch_init(Microbatch *batch, uint32_t n_logs);
 void microbatch_free(Microbatch *batch);
 

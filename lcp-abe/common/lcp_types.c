@@ -66,18 +66,13 @@ void mpk_init(MasterPublicKey *mpk, uint32_t n_attributes) {
     mpk->k = PARAM_D;                     // Module rank k
     mpk->m = PARAM_M;                     // Module dimension m = d*(k_param+2)
     
-    // A is k×m matrix, but Module_BFRS TrapGen outputs (m-k)×k, so we store that format
-    // A has implicit identity I_k, so we store the (m-k) × k part
     size_t a_size = (PARAM_M - PARAM_D) * PARAM_D * PARAM_N;
     mpk->A = (poly_matrix)calloc(a_size, sizeof(scalar));
     
-    // B_plus: ℓ × m matrix (one 1×m vector per attribute)
     mpk->B_plus = (poly_matrix)calloc(n_attributes * PARAM_M * PARAM_N, sizeof(scalar));
     
-    // B_minus: ℓ × m matrix (one 1×m vector per attribute)
     mpk->B_minus = (poly_matrix)calloc(n_attributes * PARAM_M * PARAM_N, sizeof(scalar));
     
-    // β: single polynomial in Rq
     mpk->beta = (poly)calloc(PARAM_N, sizeof(scalar));
 }
 
@@ -105,14 +100,9 @@ void mpk_free(MasterPublicKey *mpk) {
 // ============================================================================
 
 void msk_init(MasterSecretKey *msk) {
-    // Allocate trapdoor matrix T
-    // T should be 2*PARAM_D × PARAM_D*PARAM_K as expected by TrapGen
     msk->T = (poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N, sizeof(scalar));
     
-    // Allocate complex representations for Gaussian sampling
-    // cplx_T has same dimensions as T
     msk->cplx_T = (cplx_poly_matrix)calloc(2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N, sizeof(cplx));
-    // sch_comp is a triangular matrix: PARAM_D * (2*PARAM_D + 1) blocks, each of size PARAM_N
     msk->sch_comp = (cplx_poly_matrix)calloc(PARAM_N * PARAM_D * (2 * PARAM_D + 1), sizeof(cplx));
 }
 
@@ -139,10 +129,8 @@ void usk_init(UserSecretKey *usk, uint32_t n_components) {
     attribute_set_init(&usk->attr_set);
     usk->n_components = n_components;
     
-    // ωA: single m-dimensional vector
     usk->omega_A = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));
     
-    // {ωi}: one m-dimensional vector per attribute
     usk->omega_i = (poly_matrix*)calloc(n_components, sizeof(poly_matrix));
     for (uint32_t i = 0; i < n_components; i++) {
         usk->omega_i[i] = (poly_matrix)calloc(PARAM_M * PARAM_N, sizeof(scalar));

@@ -1514,15 +1514,31 @@ void multiply_by_A(poly_matrix y, poly_matrix A, poly_matrix x)
 	// y <- A[:,d:] * x[d:]
 	poly_matrix x_d = poly_matrix_element(x, 1, PARAM_D, 0);
 	
+	// DEBUG: This is the expensive operation - matrix multiplication in CRT domain
+	// With PARAM_D=4, PARAM_M=128, this multiplies 4×124 matrix with 124×1 vector
+	// = 4×124 = 496 polynomial multiplications, each involving CRT operations
+	if (getenv("ARITH_DEBUG")) {
+		printf("[DEBUG] multiply_by_A: Starting mul_crt_poly_matrix (D=%d, M-D=%d, N=%d)...\n", 
+		       PARAM_D, PARAM_M - PARAM_D, PARAM_N); fflush(stdout);
+	}
 	mul_crt_poly_matrix(y, A, x_d, PARAM_D, PARAM_M - PARAM_D, 1, LOG_R);
+	if (getenv("ARITH_DEBUG")) {
+		printf("[DEBUG] multiply_by_A: mul_crt_poly_matrix completed\n"); fflush(stdout);
+	}
 	
-	// y <- y + x[:d]
-	for(int i = 0 ; i < PARAM_N * PARAM_D ; ++i)
+	// y <- y + x[:d] (use add_poly for consistent reduction behavior)
+	if (getenv("ARITH_DEBUG")) {
+		printf("[DEBUG] multiply_by_A: Adding identity components (D=%d)...\n", PARAM_D); fflush(stdout);
+	}
+	for(int i = 0 ; i < PARAM_D ; ++i)
 		{
-		y[i] = reduce_naive(y[i] + x[i]);
+		poly y_i = poly_matrix_element(y, 1, i, 0);
+		poly x_i = poly_matrix_element(x, 1, i, 0);
+		add_poly(y_i, y_i, x_i, PARAM_N - 1);
 		}
-	
-	// freeze_poly(y, PARAM_N * PARAM_D - 1);  // Already reduced above
+	if (getenv("ARITH_DEBUG")) {
+		printf("[DEBUG] multiply_by_A: Completed\n"); fflush(stdout);
+	}
 	}
 
 /*

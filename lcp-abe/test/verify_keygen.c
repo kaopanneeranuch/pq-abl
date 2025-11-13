@@ -14,8 +14,7 @@ int main() {
     printf("[Init] Initializing Module_BFRS...\n");
     init_crt_trees();
     init_cplx_roots_of_unity();
-    init_crt_trees();
-    init_D_lattice_coeffs();
+    /* init_crt_trees already called; init_D_lattice_coeffs() not present */
     
     // Load MPK
     MasterPublicKey mpk;

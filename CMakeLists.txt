@@ -2,11 +2,17 @@ cmake_minimum_required(VERSION 3.10)
 project(pq_abl C)
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -Wextra")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-parameter -Wno-unused-variable")
 
-# Add math library
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -lm")
+# Platform-specific compiler flags
+if(MSVC)
+    # MSVC compiler flags
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /O2 /W3")
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+else()
+    # GCC/Clang compiler flags
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -Wextra")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-parameter -Wno-unused-variable")
+endif()
 
 # Option to use OpenSSL for AES-GCM
 option(USE_OPENSSL "Use OpenSSL for AES-GCM" ON)
@@ -54,11 +60,28 @@ set(LCP_ABE_SOURCES
 
 # Build Module_BFRS library
 add_library(module_bfrs STATIC ${MODULE_BFRS_SOURCES})
-target_link_libraries(module_bfrs m)
+
+# Link math library (needed for GCC/Clang, but not MSVC)
+# MSVC includes math functions automatically, but GCC/Clang (including MinGW) need -lm
+if(NOT MSVC)
+    target_link_libraries(module_bfrs m)
+endif()
+
+## Enable AES intrinsics when using GCC/Clang on x86_64 so <wmmintrin.h> inlines work
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    # -maes enables AES-NI intrinsics; add privately to this target
+    target_compile_options(module_bfrs PRIVATE -maes)
+endif()
 
 # Build LCP-ABE library
 add_library(lcp_abe STATIC ${LCP_ABE_SOURCES})
-target_link_libraries(lcp_abe module_bfrs m)
+target_link_libraries(lcp_abe module_bfrs)
+
+# Link math library (needed for GCC/Clang, but not MSVC)
+if(NOT MSVC)
+    target_link_libraries(lcp_abe m)
+endif()
+
 if(USE_OPENSSL)
     target_link_libraries(lcp_abe OpenSSL::SSL OpenSSL::Crypto)
 endif()
@@ -76,7 +99,12 @@ target_link_libraries(test_encrypt lcp_abe)
 # In-memory round-trip test
 add_executable(test_roundtrip lcp-abe/test/test_roundtrip.c)
 target_include_directories(test_roundtrip PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
-target_link_libraries(test_roundtrip PRIVATE lcp_abe module_bfrs m)
+target_link_libraries(test_roundtrip PRIVATE lcp_abe module_bfrs)
+
+# Link math library (needed for GCC/Clang, but not MSVC)
+if(NOT MSVC)
+    target_link_libraries(test_roundtrip PRIVATE m)
+endif()
 
 add_executable(test_decrypt lcp-abe/test/decrypt.c)
 target_link_libraries(test_decrypt lcp_abe)
@@ -90,6 +118,14 @@ target_link_libraries(coeffs_linearity lcp_abe)
 
 add_executable(coeffs_failing_case lcp-abe/test/coeffs_failing_case.c)
 target_link_libraries(coeffs_failing_case lcp_abe)
+
+# Diagnostic test - minimal output
+add_executable(test_diagnostic test_diagnostic.c)
+target_include_directories(test_diagnostic PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
+target_link_libraries(test_diagnostic PRIVATE lcp_abe module_bfrs)
+if(NOT MSVC)
+    target_link_libraries(test_diagnostic PRIVATE m)
+endif()
 
 # Utility to view CT_obj files
 add_executable(view_ctobj lcp-abe/util/view_ctobj.c)

@@ -12,7 +12,10 @@ int main(void) {
     printf("[KeyGen Test] Initializing Module_BFRS...\n");
     init_crt_trees();
     init_cplx_roots_of_unity();
-    init_D_lattice_coeffs();
+    /* init_D_lattice_coeffs() was removed/never implemented in Module_BFRS
+     * Some older setups called it; current arithmetic module doesn't expose
+     * such function. Omit the call to keep the tests portable across
+     * platforms/builds. */
     
     MasterPublicKey mpk;
     MasterSecretKey msk;

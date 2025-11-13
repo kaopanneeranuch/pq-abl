@@ -636,33 +636,45 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 
 	/* Adjust p's first d polynomials so that A * p == u (make p a particular solution)
 	 * This is necessary because TI spans the kernel of A: adding TI*z will not
-	 * change A*p, so p must already satisfy the target u. */
-	if (getenv("ARITH_DEBUG")) {
-		// compute tmp = A * p
-		poly_matrix tmp = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
-		if (tmp) {
-			multiply_by_A(tmp, A_m, (poly_matrix) p);
-				// delta = u_first_poly - tmp_first_poly
-				poly tmp0 = poly_matrix_element(tmp, 1, 0, 0);
-				poly u0 = poly_matrix_element(u, PARAM_D, 0, 0);
-				poly delta = (poly)calloc(PARAM_N, sizeof(scalar));
+	 * change A*p, so p must already satisfy the target u.
+	 * 
+	 * CRITICAL FIX: This adjustment MUST run unconditionally, not just in ARITH_DEBUG mode!
+	 * Without this, A * x = A * p ≠ u, breaking the trapdoor relationship.
+	 */
+	// compute tmp = A * p
+	printf("[DEBUG] sample_pre_target: Computing A * p (this may take a while)...\n"); fflush(stdout);
+	poly_matrix tmp = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+	if (tmp) {
+		printf("[DEBUG] sample_pre_target: Calling multiply_by_A (D=%d, M=%d, N=%d)...\n", PARAM_D, PARAM_M, PARAM_N); fflush(stdout);
+		multiply_by_A(tmp, A_m, (poly_matrix) p);
+		printf("[DEBUG] sample_pre_target: multiply_by_A completed\n"); fflush(stdout);
+		// delta = u - tmp (for all D components)
+		printf("[DEBUG] sample_pre_target: Adjusting p components (D=%d)...\n", PARAM_D); fflush(stdout);
+		for (int comp = 0; comp < PARAM_D; comp++) {
+			printf("[DEBUG] sample_pre_target: Adjusting component %d/%d...\n", comp+1, PARAM_D); fflush(stdout);
+			poly tmp_comp = poly_matrix_element(tmp, 1, comp, 0);
+			poly u_comp = poly_matrix_element(u, PARAM_D, comp, 0);
+			poly delta = (poly)calloc(PARAM_N, sizeof(scalar));
 			if (delta) {
-				// delta = u0 - tmp0
-				memcpy(delta, u0, PARAM_N * sizeof(scalar));
-				sub_poly(delta, delta, tmp0, PARAM_N - 1);
-				// add delta to p_first_d
+				// delta = u_comp - tmp_comp
+				memcpy(delta, u_comp, PARAM_N * sizeof(scalar));
+				sub_poly(delta, delta, tmp_comp, PARAM_N - 1);
+				freeze_poly(delta, PARAM_N - 1);
+				
+				// Since A = [I_d | Ā], we can adjust p[comp] directly to fix the first D components
+				// For component comp, p[comp] contributes directly to A*p[comp] via the identity part
 				poly_matrix p_as_poly = (poly_matrix) p;
-				poly p_first = poly_matrix_element(p_as_poly, 1, 0, 0);
-				add_poly(p_first, p_first, delta, PARAM_N - 1);
-				freeze_poly(p_first, PARAM_N - 1);
+				poly p_comp = poly_matrix_element(p_as_poly, 1, comp, 0);
+				add_poly(p_comp, p_comp, delta, PARAM_N - 1);
+				freeze_poly(p_comp, PARAM_N - 1);
+				
 				free(delta);
-			} else {
-				fprintf(stderr, "[SAMPLER DIAG] failed to alloc delta\n"); fflush(stderr);
 			}
-			free(tmp);
-		} else {
-			fprintf(stderr, "[SAMPLER DIAG] failed to alloc tmp\n"); fflush(stderr);
 		}
+		printf("[DEBUG] sample_pre_target: p adjustment completed\n"); fflush(stdout);
+		free(tmp);
+	} else {
+		fprintf(stderr, "[DEBUG] sample_pre_target: ERROR: Failed to allocate tmp\n"); fflush(stderr);
 	}
 
 	/* Diagnostic: compute A * p (CRT) to see whether p already maps to the

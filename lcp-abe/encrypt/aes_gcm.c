@@ -9,7 +9,6 @@
 // ============================================================================
 
 // Simplified AES-GCM (NOT SECURE - for demonstration only)
-// In Ubuntu VM, link with OpenSSL: -lssl -lcrypto
 
 #ifdef USE_OPENSSL
 #include <openssl/evp.h>
@@ -149,8 +148,6 @@ int aes_gcm_decrypt(const uint8_t *ciphertext, size_t ciphertext_len,
 }
 
 #else
-// STUB IMPLEMENTATION - NOT SECURE
-// Replace with OpenSSL in Ubuntu VM
 int aes_gcm_encrypt(const uint8_t *plaintext, size_t plaintext_len,
                     const uint8_t key[AES_KEY_SIZE],
                     const uint8_t nonce[AES_NONCE_SIZE],

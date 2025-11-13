@@ -39,28 +39,19 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         printf("[Decrypt]   Coefficient[%d] = %u\n", i, coefficients[i]);
     }
 
-    // ====================================================================
-    // Option C Diagnostic: compute A * omega_A and Σ(B_plus[attr] * omega_i)
-    // and compare (A·ωA + Σ B·ω) ?= β (all in CRT domain). Dump CRT
-    // components for later per-component diffing with encryption-side dumps.
-    // ====================================================================
     if (getenv("ARITH_DEBUG")) {
         printf("[Decrypt DIAG] Computing A·ω_A and Σ(B·ω) for diagnostic comparison\n");
 
-        // Buffer for A * omega_A result (y is D-dimensional)
         poly_matrix y = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
         if (y) {
-            // multiply_by_A expects y, A, x
             multiply_by_A(y, mpk->A, usk->omega_A);
 
-            // Dump first component y[0] (A·ω_A first poly) as CRT components
             poly a0 = poly_matrix_element(y, 1, 0, 0);
             for (int comp = 0; comp < LOG_R; comp++) {
                 char tag[80];
                 snprintf(tag, sizeof(tag), "DIAG_Aomega_comp_%d", comp);
                 dump_crt_component(a0, LOG_R, comp, tag);
             }
-            /* Also dump full coefficient representation for a0 (COEFF) */
             poly a0_copy = (poly)calloc(PARAM_N, sizeof(scalar));
             if (a0_copy) {
                 memcpy(a0_copy, a0, PARAM_N * sizeof(scalar));
@@ -71,7 +62,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                 free(a0_copy);
             }
 
-            /* Dump a few omega_A polynomials (COEFF) from user's key for comparison */
             for (uint32_t _j = 0; _j < PARAM_M && _j < 8; _j++) {
                 poly omega_j = poly_matrix_element(usk->omega_A, 1, _j, 0);
                 poly omega_copy = (poly)calloc(PARAM_N, sizeof(scalar));
@@ -85,22 +75,17 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             }
         }
 
-        // Compute Σ(B_plus[attr] · omega_i) into b_sum (single poly)
         poly b_sum = (poly)calloc(PARAM_N, sizeof(scalar));
         double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
 
         if (b_sum && prod && reduced) {
-            // Iterate over user's ωi entries (as provided in USK)
             for (uint32_t ai = 0; ai < usk->n_components; ai++) {
-                // Attribute index
                 uint32_t attr_idx = usk->attr_set.attrs[ai].index;
                 if (attr_idx >= mpk->n_attributes) continue;
 
-                // B_plus row for this attribute
                 poly_matrix B_plus_row = &mpk->B_plus[attr_idx * PARAM_M * PARAM_N];
 
-                // temp accumulator for this attribute's dot product
                 poly temp_res = (poly)calloc(PARAM_N, sizeof(scalar));
                 if (!temp_res) continue;
 
@@ -108,7 +93,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                     poly B_ij = &B_plus_row[j * PARAM_N];
                     poly omega_ij = poly_matrix_element(usk->omega_i[ai], 1, j, 0);
 
-                    // mul and reduce
                     memset(prod, 0, 2 * PARAM_N * sizeof(double_scalar));
                     memset(reduced, 0, PARAM_N * sizeof(scalar));
                     mul_crt_poly(prod, B_ij, omega_ij, LOG_R);
@@ -118,20 +102,17 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                     freeze_poly(temp_res, PARAM_N - 1);
                 }
 
-                // Add attribute contribution to global b_sum
                 add_poly(b_sum, b_sum, temp_res, PARAM_N - 1);
                 freeze_poly(b_sum, PARAM_N - 1);
                 free(temp_res);
             }
 
-            // Dump b_sum components
             for (int comp = 0; comp < LOG_R; comp++) {
                 char tagb[80];
                 snprintf(tagb, sizeof(tagb), "DIAG_Bomega_sum_comp_%d", comp);
                 dump_crt_component(b_sum, LOG_R, comp, tagb);
             }
 
-            // Compute lhs = a0 + b_sum and dump
             if (y && b_sum) {
                 poly lhs = (poly)calloc(PARAM_N, sizeof(scalar));
                 poly a0 = poly_matrix_element(y, 1, 0, 0);
@@ -145,7 +126,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                     dump_crt_component(lhs, LOG_R, comp, tagl);
                 }
 
-                // Also dump mpk->beta components for direct comparison
                 for (int comp = 0; comp < LOG_R; comp++) {
                     char tagbeta[80];
                     snprintf(tagbeta, sizeof(tagbeta), "DIAG_mpk_beta_comp_%d", comp);
@@ -162,224 +142,110 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         if (y) free(y);
     }
     
-    // ========================================================================
-    // Decryption Algorithm (Proper Lattice-Based):
-    // 
-    // Given:
-    //   ct_key = β·s[0] + e_key + encode(K_log)
-    //   C0[i] = s[i] + e0[i] for i < PARAM_D
-    //   C[j] = B_plus[ρ(j)]·s[0] + e_j + λ_j·g
-    //   A·ω_A ≈ β - Σ(B_plus[user_attrs]·ω[user_attrs])
-    //
-    // Decryption computes:
-    //   ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j])
-    //   ≈ ω_A·s + Σ(coeff[j]·ω[ρ(j)]·B_plus[ρ(j)]·s[0])
-    //   ≈ β·s[0]  (using the trapdoor relationship)
-    //
-    // Then: ct_key - (β·s[0]) ≈ e_key + encode(K_log)
-    // Extract K_log from high bits (errors don't affect high 8 bits)
-    // ========================================================================
-    
-    // ========================================================================
-    // PROPER LCP-ABE DECRYPTION (following paper specification):
-    // 
-    // Encryption: ct_key = e_key + β·s[0] + encode(K_log)  (in COEFF domain)
-    // Decryption: Compute ω_A·C0 + Σ(coeff[j]·ω[ρ(j)]·C[j]) ≈ β·s[0]
-    //             Then: ct_key - (β·s[0]) ≈ e_key + encode(K_log)
-    //             Extract K_log from high 8 bits
-    // ========================================================================
-    
     poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
     
-    // Copy ct_key - it's already in COEFFICIENT domain from encryption
-    // (encryption encodes K_log in COEFF domain and keeps it there)
     memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
     printf("[Decrypt]   DEBUG: ct_key (already COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
-
-    /* Lightweight provenance mode: print only pointers and compact FNV64
-     * hashes (early) to detect in-process mutation with minimal log output.
-     * Controlled by ARITH_MIN_PROV environment var. This is intentionally
-     * much lighter than the full ARITH_PROVENANCE path. */
     if (getenv("ARITH_MIN_PROV")) {
         uint64_t fnv_early = 1469598103934665603ULL;
         for (int _i = 0; _i < PARAM_N; _i++) {
             uint64_t v = (uint64_t)recovered[_i];
-            /* mix 4 bytes per scalar (cheap) instead of 8-byte loop to keep
-             * this fast while still producing a decent fingerprint */
             fnv_early ^= (v & 0xFFFFFFFFULL);
             fnv_early *= 1099511628211ULL;
         }
         printf("[DECRYPT MINPROV] recovered ptr=%p ct_key ptr=%p Early FNV64=0x%016" PRIx64 "\n",
                (void*)recovered, (void*)ct_abe->ct_key, fnv_early);
     }
-    /* Optional full COEFF dump of the ciphertext's ct_key as observed by
-     * the decryption routine. This will be compared against the encryption
-     * side's ct_key_coeff_full to locate any divergence. */
     if (getenv("ARITH_DUMP_FULL")) {
         printf("[DECRYPT DUMP FULL] ct_key_coeff_full:\n");
         for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", recovered[_i]);
         printf("\n");
     }
     
-    // Compute the decryption term IN CRT DOMAIN, then convert to COEFF once
-    // This matches how ct_key was created: (e_key + β·s[0]) in CRT, then converted to COEFF
-    /* We'll compute the decryption term directly in the COEFFICIENT domain to
-     * avoid subtle CRT <-> COEFF ordering/rounding differences. For each per-
-     * polynomial product we reduce the CRT product and immediately convert it
-     * to COEFF before accumulating into decryption_term_coeff. This keeps the
-     * accumulated representation identical to how ct_key is produced in
-     * encryption (which stores ct_key in COEFF domain). */
+    poly decryption_term_crt = (poly)calloc(PARAM_N, sizeof(scalar));
     poly decryption_term_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
 
-    // Step 1: Compute ω_A · C0 (inner product) and accumulate in COEFF
-    printf("\n[Decrypt]   Step 1: Computing ω_A · C0 (inner product) and accumulating in COEFF\n");
-    // DIAGNOSTIC: print addresses and first coefficients of first few C0 polynomials
-    if (getenv("ARITH_DEBUG")) {
-        printf("[DECRYPT DIAG] ct_abe->C0 ptr=%p PARAM_M=%u PARAM_N=%u\n", (void*)ct_abe->C0, (unsigned)PARAM_M, (unsigned)PARAM_N);
-        for (uint32_t _i = 0; _i < 6 && _i < PARAM_M; _i++) {
-            poly c0_i = poly_matrix_element(ct_abe->C0, 1, _i, 0);
-            printf("[DECRYPT DIAG] C0_ct i=%u ptr=%p first4=%u %u %u %u\n",
-                   _i, (void*)c0_i, c0_i[0], c0_i[1], c0_i[2], c0_i[3]);
-        }
-    }
+    printf("\n[Decrypt]   Step 1: Computing (A·ω_A)[0]·C0[0] (extract [0] component)\n");
+    printf("[Decrypt]   Formula: (A·ω_A)[0]·C0[0] where C0[0] = s[0] + e0[0]\n");
+    printf("[Decrypt]   Trapdoor: (A·ω_A)[0] + Σ(B+_i · ω_i) ≈ β, so this ≈ β·C0[0]\n");
     
-    /* Accumulator for roundtrip-of-coeffs (CRT) to check linearity: sum of
-     * (prod_reduced -> COEFF -> CRT) over j. If conversion is linear, this
-     * accumulator converted to COEFF should equal the final decryption_term
-     * COEFF produced by converting the CRT accumulator. */
-    poly sum_roundtrip_crt = (poly)calloc(PARAM_N, sizeof(scalar));
-
-    for (uint32_t j = 0; j < PARAM_M; j++) {
-        poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
-        poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
-        /* Diagnostic mapping: print per-j pointers and first4 coeffs to detect
-         * ordering/layout mismatches between encrypt and decrypt. */
-        if (getenv("ARITH_DEBUG") && j < 32) {
-            printf("[DECRYPT MAP] j=%u omega_A_j ptr=%p first4=%u %u %u %u | c0_j ptr=%p first4=%u %u %u %u\n",
-                   j, (void*)omega_A_j, omega_A_j[0], omega_A_j[1], omega_A_j[2], omega_A_j[3],
-                   (void*)c0_j, c0_j[0], c0_j[1], c0_j[2], c0_j[3]);
-        }
-
+    poly_matrix A_omega_A = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+    if (!A_omega_A) {
+        fprintf(stderr, "[Decrypt] ERROR: Failed to allocate A_omega_A\n");
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
+    }
+    multiply_by_A(A_omega_A, mpk->A, usk->omega_A);
+    
+    poly A_omega_A_0 = poly_matrix_element(A_omega_A, 1, 0, 0);
+    poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+    
     double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-    mul_crt_poly(prod, omega_A_j, c0_j, LOG_R);
-        /* Diagnostic: when ARITH_DEBUG is set, dump each reduced CRT component
-         * for this product so we can later compare with encryption-side dumps. */
-        if (getenv("ARITH_DEBUG")) {
-            for (int comp = 0; comp < LOG_R; comp++) {
-                char tag[64];
-                snprintf(tag, sizeof(tag), "DECRYPT_step1_attr_%d_j_%d_comp_%d", j, (int)j, comp);
-                dump_double_crt_component(prod, LOG_R, comp, tag);
-            }
-        }
-
+    if (!prod) {
+        fprintf(stderr, "[Decrypt] ERROR: Failed to allocate prod\n");
+        free(A_omega_A);
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
+    }
+    
+    mul_crt_poly(prod, A_omega_A_0, c0_0, LOG_R);
+    
     poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-    reduce_double_crt_poly(prod_reduced, prod, LOG_R);
-
-    /* Convert this per-term reduced CRT product to COEFFICIENT domain and
-     * add it immediately to the COEFF accumulator. This reduces reliance
-     * on a large CRT accumulator and keeps the arithmetic consistent with
-     * encryption (which keeps ct_key in COEFF). */
-    coeffs_representation(prod_reduced, LOG_R);
-    add_poly(decryption_term_coeff, decryption_term_coeff, prod_reduced, PARAM_N - 1);
-    freeze_poly(decryption_term_coeff, PARAM_N - 1);
-
-    /* Diagnostic: dump the reduced COEFF for this per-j product when enabled */
-        if (getenv("ARITH_DEBUG")) {
-            for (int comp = 0; comp < LOG_R; comp++) {
-                char tagr[80];
-                snprintf(tagr, sizeof(tagr), "DECRYPT_step1_prod_reduced_j_%u_comp_%d", j, comp);
-                dump_crt_component(prod_reduced, LOG_R, comp, tagr);
-            }
-            /* Also dump a COEFF representation of this per-j reduced product for
-             * direct comparison with encryption-side COEFF dumps. Print for ALL
-             * j but limit to first 16 coefficients to keep logs manageable. */
-            {
-                poly prod_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
-                if (prod_coeff) {
-                    memcpy(prod_coeff, prod_reduced, PARAM_N * sizeof(scalar));
-                    /* Normalize the copied CRT component before converting to
-                     * COEFF. This makes the per-term conversion use the same
-                     * canonical representative as the aggregated path. */
-                    freeze_poly(prod_coeff, PARAM_N - 1);
-                    coeffs_representation(prod_coeff, LOG_R);
-                    printf("[DECRYPT DIAG] Step1_prod_j_%u_COEFF: COEFF (deg=%d, first %d):", j, PARAM_N, 16);
-                    for (int _k = 0; _k < 16; _k++) printf(" %u", prod_coeff[_k]);
-                    printf("\n");
-
-                    /* Optional full CRT dump for exact-data harness */
-                    if (getenv("ARITH_DUMP_FULL")) {
-                        printf("[DECRYPT DUMP FULL] prod_reduced_j_%u_full:\n", j);
-                        for (int _i = 0; _i < PARAM_N; _i++) {
-                            printf(" %u", prod_reduced[_i]);
-                        }
-                        printf("\n");
-                    }
-
-                    /* Convert back to CRT (roundtrip) and add to sum_roundtrip_crt */
-                    crt_representation(prod_coeff, LOG_R);
-                    /* Optional: dump the CRT result of the COEFF->CRT roundtrip
-                     * so we can later reconstruct exactly what was added into
-                     * sum_roundtrip_crt. This helps trace upstream contributors
-                     * to any divergence observed at higher combine nodes. */
-                    if (getenv("ARITH_DUMP_FULL")) {
-                        printf("[DECRYPT DUMP FULL] prod_roundtrip_crt_j_%u_full:\n", j);
-                        for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", prod_coeff[_i]);
-                        printf("\n");
-                    }
-                    add_poly(sum_roundtrip_crt, sum_roundtrip_crt, prod_coeff, PARAM_N - 1);
-                    free(prod_coeff);
-                }
-            }
-        }
-
-        // free per-term buffers
-        if (getenv("ARITH_DEBUG")) {
-            /* For traceability still show a small COEFF snapshot */
-            poly prod_coeff_snap = prod_reduced; /* already COEFF */
-            printf("[DECRYPT DIAG] Step1_prod_j_%u_COEFF (first 16):", j);
-            for (int _k = 0; _k < 16; _k++) printf(" %u", prod_coeff_snap[_k]);
-            printf("\n");
-        }
-        
+    if (!prod_reduced) {
+        fprintf(stderr, "[Decrypt] ERROR: Failed to allocate prod_reduced\n");
         free(prod);
-        free(prod_reduced);
+        free(A_omega_A);
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
     }
     
-    /* Diagnostic B: print COEFF representation of Step 1 (ω_A · C0) so we can
-     * directly compare encrypt-side ω_A·(A^T·s) COEFF vector with the value
-     * computed during decryption BEFORE attribute contributions are added. */
-    if (getenv("ARITH_DEBUG")) {
-        poly step1_copy = (poly)calloc(PARAM_N, sizeof(scalar));
-        if (step1_copy) {
-            memcpy(step1_copy, decryption_term_coeff, PARAM_N * sizeof(scalar));
-            /* Convert in-place to COEFF domain for human-readable comparison */
-            coeffs_representation(step1_copy, LOG_R);
-            printf("[DECRYPT DIAG] Step1 (COEFF, first 16):");
-            for (int _k = 0; _k < 16; _k++) printf(" %u", step1_copy[_k]);
-            printf("\n");
-                /* Also dump full CRT array immediately after Step1 (before Step2) */
-                if (getenv("ARITH_DUMP_FULL")) {
-                    printf("[DECRYPT DUMP FULL] decryption_term_coeff_after_step1_full:\n");
-                    for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", decryption_term_coeff[_i]);
-                    printf("\n");
-                }
-            free(step1_copy);
-        }
-    }
-
-    printf("[Decrypt]   ω_A · C0 (COEFF accumulator, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-        decryption_term_coeff[0], decryption_term_coeff[1], decryption_term_coeff[2], decryption_term_coeff[3]);
+    reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+    memcpy(decryption_term_crt, prod_reduced, PARAM_N * sizeof(scalar));
+    freeze_poly(decryption_term_crt, PARAM_N - 1);
     
-    // Step 2: Add Σ(coeff[j]·ω[ρ(j)]·C[j]) in CRT domain
-    printf("\n[Decrypt]   Step 2: Computing Σ(coeff[j]·ω[ρ(j)]·C[j]) and accumulating in COEFF\n");
+    printf("[Decrypt]   (A·ω_A)[0]·C0[0] computed (CRT, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+        decryption_term_crt[0], decryption_term_crt[1], decryption_term_crt[2], decryption_term_crt[3]);
+    
+    free(prod);
+    free(prod_reduced);
+    
+    printf("\n[Decrypt]   Step 2: Computing Σ(coeff[j]·ω[ρ(j)]·C[j]) and accumulating in CRT\n");
+    
+    poly step2_contributions_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!step2_contributions_crt) {
+        fprintf(stderr, "[Decrypt] ERROR: Failed to allocate step2_contributions_crt\n");
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
+                    }
+    zero_poly(step2_contributions_crt, PARAM_N - 1);
+    
+    poly expected_step2_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!expected_step2_crt) {
+        fprintf(stderr, "[Decrypt] ERROR: Failed to allocate expected_step2_crt\n");
+        free(step2_contributions_crt);
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
+    }
+    zero_poly(expected_step2_crt, PARAM_N - 1);
+    
+    poly s_0_approx = poly_matrix_element(ct_abe->C0, 1, 0, 0);
     
     for (uint32_t i = 0; i < n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
         uint32_t policy_attr_idx = ct_abe->policy.rho[i];
         printf("[Decrypt]   Processing policy row %d (attr idx %d, coeff=%u)\n", 
                i, policy_attr_idx, coefficients[i]);
         
-        // Find corresponding omega_i in user's key
         int omega_idx = -1;
         for (uint32_t j = 0; j < usk->attr_set.count; j++) {
             if (usk->attr_set.attrs[j].index == policy_attr_idx) {
@@ -389,100 +255,148 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         }
         
         if (omega_idx == -1) {
-            /* If the reconstruction coefficient for this policy row is zero
-             * then the user's missing attribute does not contribute and we
-             * can safely skip this row. Only error if coefficient != 0. */
             if (coefficients[i] == 0) {
                 continue;
             }
             fprintf(stderr, "[Decrypt] ERROR: Policy requires attr %d but user doesn't have it!\n",
                     policy_attr_idx);
+            free(decryption_term_crt);
             free(decryption_term_coeff);
             free(recovered);
             return -1;
         }
         
-        // Compute ω[ρ(i)]·C[i] as inner product in CRT
-    poly temp_sum_crt = (poly)calloc(PARAM_N, sizeof(scalar));
-        // DIAGNOSTIC: print first few polynomials of C[i] as seen by decryption
-        if (getenv("ARITH_DEBUG")) {
-            for (uint32_t _j = 0; _j < 4 && _j < PARAM_M; _j++) {
-                poly c_i_j_diag = poly_matrix_element(ct_abe->C[i], 1, _j, 0);
-                printf("[DECRYPT DIAG] C_ct i=%u j=%u ptr=%p first4=%u %u %u %u\n",
-                       i, _j, (void*)c_i_j_diag, c_i_j_diag[0], c_i_j_diag[1], c_i_j_diag[2], c_i_j_diag[3]);
-            }
+        poly temp_sum_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!temp_sum_crt) {
+            fprintf(stderr, "[Decrypt] ERROR: Failed to allocate temp_sum_crt\n");
+            free(decryption_term_crt);
+            free(decryption_term_coeff);
+            free(recovered);
+            return -1;
         }
-
+        zero_poly(temp_sum_crt, PARAM_N - 1);
+        
         for (uint32_t j = 0; j < PARAM_M; j++) {
             poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
             poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
             
             double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-            mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
-            /* Diagnostic: dump reduced CRT components for each inner-product term */
-            if (getenv("ARITH_DEBUG")) {
-                for (int comp = 0; comp < LOG_R; comp++) {
-                    char tag2[80];
-                    snprintf(tag2, sizeof(tag2), "DECRYPT_attr_%u_j_%u_comp_%d", policy_attr_idx, j, comp);
-                    dump_double_crt_component(prod, LOG_R, comp, tag2);
-                }
+            if (!prod) {
+                fprintf(stderr, "[Decrypt] ERROR: Failed to allocate prod\n");
+                free(temp_sum_crt);
+                free(decryption_term_crt);
+                free(decryption_term_coeff);
+                free(recovered);
+                return -1;
             }
-
-            poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
-            reduce_double_crt_poly(prod_reduced, prod, LOG_R);
-
-            // Convert per-term reduced product to COEFF and add to temp_sum_coeff
-            coeffs_representation(prod_reduced, LOG_R);
-            add_poly(decryption_term_coeff, decryption_term_coeff, prod_reduced, PARAM_N - 1);
-            freeze_poly(decryption_term_coeff, PARAM_N - 1);
             
-            // Debug: print first coefficients of this product/reduction for first few j
-            if (j < 3) {
-                printf("[Decrypt DEBUG] attr %u, j=%u: prod_reduced (CRT, first 4) = [%u, %u, %u, %u]\n",
-                       policy_attr_idx, j, prod_reduced[0], prod_reduced[1], prod_reduced[2], prod_reduced[3]);
-                printf("[Decrypt DEBUG] attr %u, j=%u: temp_sum_crt (CRT, first 4) = [%u, %u, %u, %u]\n",
-                       policy_attr_idx, j, temp_sum_crt[0], temp_sum_crt[1], temp_sum_crt[2], temp_sum_crt[3]);
+            mul_crt_poly(prod, omega_ij, c_i_j, LOG_R);
+            
+            poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (!prod_reduced) {
+                fprintf(stderr, "[Decrypt] ERROR: Failed to allocate prod_reduced\n");
+                free(prod);
+                free(temp_sum_crt);
+                free(decryption_term_crt);
+                free(decryption_term_coeff);
+                free(recovered);
+                return -1;
             }
+            
+            reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+            
+            add_poly(temp_sum_crt, temp_sum_crt, prod_reduced, PARAM_N - 1);
+            freeze_poly(temp_sum_crt, PARAM_N - 1);
             
             free(prod);
             free(prod_reduced);
         }
         
-        /* In the updated path we already converted per-term products to COEFF
-         * and added them into decryption_term_coeff, multiplied by 1 as part
-         * of the direct accumulation above. If coefficients[i] != 1 we need
-         * to scale the contribution we just added. Since we don't track
-         * per-attribute temporary storage here, perform a corrective scaling
-         * by re-computing temp_sum_crt → COEFF then applying the coefficient
-         * and adding (this is only used in the uncommon coefficient != 1
-         * case). For the common coeff==1 we can skip extra work. */
-        if (coefficients[i] != 1) {
-            /* Recompute attribute contribution in CRT then convert to COEFF */
-            poly temp_sum_recomputed = (poly)calloc(PARAM_N, sizeof(scalar));
-            for (uint32_t j = 0; j < PARAM_M; j++) {
-                poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
-                poly c_i_j = poly_matrix_element(ct_abe->C[i], 1, j, 0);
-                double_poly prod2 = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
-                mul_crt_poly(prod2, omega_ij, c_i_j, LOG_R);
-                poly prod_red2 = (poly)calloc(PARAM_N, sizeof(scalar));
-                reduce_double_crt_poly(prod_red2, prod2, LOG_R);
-                coeffs_representation(prod_red2, LOG_R);
-                add_poly(temp_sum_recomputed, temp_sum_recomputed, prod_red2, PARAM_N - 1);
-                free(prod2);
-                free(prod_red2);
-            }
-            /* Scale and add */
-            for (uint32_t k = 0; k < PARAM_N; k++) {
-                uint64_t mul = (uint64_t)coefficients[i];
-                if (mul > 0) mul = mul - 1; /* we've already added 1x earlier */
-                uint64_t scaled = ((uint64_t)temp_sum_recomputed[k] * mul) % PARAM_Q;
-                decryption_term_coeff[k] = (decryption_term_coeff[k] + scaled) % PARAM_Q;
-            }
-            free(temp_sum_recomputed);
+        poly scaled_contribution = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!scaled_contribution) {
+            fprintf(stderr, "[Decrypt] ERROR: Failed to allocate scaled_contribution\n");
+            free(temp_sum_crt);
+            free(step2_contributions_crt);
+            free(expected_step2_crt);
+            free(decryption_term_crt);
+            free(decryption_term_coeff);
+            free(recovered);
+            return -1;
         }
-        /* Diagnostic: dump CRT components of temp_sum_crt after coefficient
-         * multiplication so we can compare each attribute contribution with
-         * the corresponding encryption-side term. */
+        
+        for (uint32_t k = 0; k < PARAM_N; k++) {
+            uint64_t scaled = ((uint64_t)temp_sum_crt[k] * (uint64_t)coefficients[i]) % PARAM_Q;
+            scaled_contribution[k] = (uint32_t)scaled;
+            decryption_term_crt[k] = (decryption_term_crt[k] + scaled) % PARAM_Q;
+        }
+        freeze_poly(decryption_term_crt, PARAM_N - 1);
+        freeze_poly(scaled_contribution, PARAM_N - 1);
+        
+        add_poly(step2_contributions_crt, step2_contributions_crt, scaled_contribution, PARAM_N - 1);
+        freeze_poly(step2_contributions_crt, PARAM_N - 1);
+        
+        poly expected_attr_contrib = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (expected_attr_contrib) {
+            zero_poly(expected_attr_contrib, PARAM_N - 1);
+            
+            poly_matrix B_plus_attr_diag = &mpk->B_plus[policy_attr_idx * PARAM_M * PARAM_N];
+            double_poly temp_prod_exp = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            poly reduced_exp = (poly)calloc(PARAM_N, sizeof(scalar));
+            
+            if (temp_prod_exp && reduced_exp) {
+            for (uint32_t j = 0; j < PARAM_M; j++) {
+                    poly B_ij = &B_plus_attr_diag[j * PARAM_N];
+                poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
+                    
+                    mul_crt_poly(temp_prod_exp, B_ij, omega_ij, LOG_R);
+                    reduce_double_crt_poly(reduced_exp, temp_prod_exp, LOG_R);
+                    add_poly(expected_attr_contrib, expected_attr_contrib, reduced_exp, PARAM_N - 1);
+                    freeze_poly(expected_attr_contrib, PARAM_N - 1);
+                }
+                
+                double_poly prod_s0 = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+                poly reduced_s0 = (poly)calloc(PARAM_N, sizeof(scalar));
+                
+                if (prod_s0 && reduced_s0) {
+                    mul_crt_poly(prod_s0, expected_attr_contrib, s_0_approx, LOG_R);
+                    reduce_double_crt_poly(reduced_s0, prod_s0, LOG_R);
+                    
+            for (uint32_t k = 0; k < PARAM_N; k++) {
+                        uint64_t scaled_exp = ((uint64_t)reduced_s0[k] * (uint64_t)coefficients[i]) % PARAM_Q;
+                        expected_step2_crt[k] = (expected_step2_crt[k] + scaled_exp) % PARAM_Q;
+                    }
+                    freeze_poly(expected_step2_crt, PARAM_N - 1);
+                    
+                    poly scaled_contrib_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+                    poly expected_contrib_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+                    if (scaled_contrib_coeff && expected_contrib_coeff) {
+                        memcpy(scaled_contrib_coeff, scaled_contribution, PARAM_N * sizeof(scalar));
+                        memcpy(expected_contrib_coeff, reduced_s0, PARAM_N * sizeof(scalar));
+                        coeffs_representation(scaled_contrib_coeff, LOG_R);
+                        coeffs_representation(expected_contrib_coeff, LOG_R);
+                        
+                        printf("[Decrypt DIAG] Attr %u: Actual Step2 contrib (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+                               policy_attr_idx, scaled_contrib_coeff[0], scaled_contrib_coeff[1], 
+                               scaled_contrib_coeff[2], scaled_contrib_coeff[3]);
+                        printf("[Decrypt DIAG] Attr %u: Expected (B+·ω)·s[0]·coeff (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+                               policy_attr_idx, expected_contrib_coeff[0], expected_contrib_coeff[1],
+                               expected_contrib_coeff[2], expected_contrib_coeff[3]);
+                        
+                        free(scaled_contrib_coeff);
+                        free(expected_contrib_coeff);
+            }
+                    
+                    free(prod_s0);
+                    free(reduced_s0);
+                }
+                
+                free(temp_prod_exp);
+                free(reduced_exp);
+            }
+            free(expected_attr_contrib);
+        }
+        
+        free(scaled_contribution);
         if (getenv("ARITH_DEBUG")) {
             for (int comp = 0; comp < LOG_R; comp++) {
                 char tagt[96];
@@ -491,7 +405,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             }
         }
         
-        // Debug: convert a copy of temp_sum_crt to COEFF for inspection (non-destructive)
         poly temp_sum_coeffs = (poly)calloc(PARAM_N, sizeof(scalar));
         if (temp_sum_coeffs) {
             memcpy(temp_sum_coeffs, temp_sum_crt, PARAM_N * sizeof(scalar));
@@ -501,36 +414,315 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             free(temp_sum_coeffs);
         }
 
-    // temp_sum_crt consumed; we keep aggregated values in decryption_term_coeff
-    if (getenv("ARITH_DEBUG")) {
-        uint64_t fnv2 = 1469598103934665603ULL;
-        for (int _ii = 0; _ii < PARAM_N; _ii++) {
-            fnv2 ^= (uint64_t)decryption_term_coeff[_ii];
-            fnv2 *= 1099511628211ULL;
-        }
-        printf("[DECRYPT DIAG] After adding attr %u (policy row %u) decryption_term_coeff ptr=%p hash=0x%016" PRIx64 " first4=[%u,%u,%u,%u]\n",
-               policy_attr_idx, i, (void*)decryption_term_coeff, fnv2, decryption_term_coeff[0], decryption_term_coeff[1], decryption_term_coeff[2], decryption_term_coeff[3]);
-    }
         free(temp_sum_crt);
     }
     
-    printf("[Decrypt]   decryption_term (COEFF accumulator, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+    memcpy(decryption_term_coeff, decryption_term_crt, PARAM_N * sizeof(scalar));
+    coeffs_representation(decryption_term_coeff, LOG_R);
+    freeze_poly(decryption_term_coeff, PARAM_N - 1);
+    
+    printf("[Decrypt]   decryption_term (CRT→COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
         decryption_term_coeff[0], decryption_term_coeff[1], decryption_term_coeff[2], decryption_term_coeff[3]);
+        
+    printf("\n[Decrypt] DIAGNOSTIC: Step 2 Contributions Analysis\n");
+    poly step2_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    poly expected_step2_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (step2_coeff && expected_step2_coeff) {
+        memcpy(step2_coeff, step2_contributions_crt, PARAM_N * sizeof(scalar));
+        memcpy(expected_step2_coeff, expected_step2_crt, PARAM_N * sizeof(scalar));
+        coeffs_representation(step2_coeff, LOG_R);
+        coeffs_representation(expected_step2_coeff, LOG_R);
+        
+        printf("[Decrypt]   Actual Step2 sum (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               step2_coeff[0], step2_coeff[1], step2_coeff[2], step2_coeff[3]);
+        printf("[Decrypt]   Expected Step2 sum (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               expected_step2_coeff[0], expected_step2_coeff[1], expected_step2_coeff[2], expected_step2_coeff[3]);
+        
+        int mismatch_count = 0;
+        for (int k = 0; k < PARAM_N && k < 16; k++) {
+            uint32_t diff = (step2_coeff[k] > expected_step2_coeff[k]) ? 
+                           (step2_coeff[k] - expected_step2_coeff[k]) : 
+                           (expected_step2_coeff[k] - step2_coeff[k]);
+            if (diff > 1000 && diff < (PARAM_Q - 1000)) {
+                if (mismatch_count < 5) {
+                    printf("[Decrypt]   Step2 MISMATCH at coeff[%d]: actual=%u, expected=%u, diff=%u\n",
+                           k, step2_coeff[k], expected_step2_coeff[k], diff);
+                }
+                mismatch_count++;
+            }
+        }
+        if (mismatch_count == 0) {
+            printf("[Decrypt]   ✓ Step2 contributions MATCH expected (first 16 coeffs)\n");
+        } else {
+            printf("[Decrypt]   ✗ Step2 contributions MISMATCH (%d differences in first 16 coeffs)\n", mismatch_count);
+        }
+    }
+    
+    printf("\n[Decrypt] DIAGNOSTIC: Verifying Step 1 + Step 2 = β·s[0]\n");
+    
+    poly step1_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+    poly step1_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (step1_crt && step1_coeff) {
+        zero_poly(step1_crt, PARAM_N - 1);
+        
+        for (uint32_t j = 0; j < PARAM_M; j++) {
+            poly omega_A_j = poly_matrix_element(usk->omega_A, 1, j, 0);
+            poly c0_j = poly_matrix_element(ct_abe->C0, 1, j, 0);
+            
+            double_poly prod_diag = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            if (prod_diag) {
+                mul_crt_poly(prod_diag, omega_A_j, c0_j, LOG_R);
+                poly prod_reduced_diag = (poly)calloc(PARAM_N, sizeof(scalar));
+                if (prod_reduced_diag) {
+                    reduce_double_crt_poly(prod_reduced_diag, prod_diag, LOG_R);
+                    add_poly(step1_crt, step1_crt, prod_reduced_diag, PARAM_N - 1);
+                    freeze_poly(step1_crt, PARAM_N - 1);
+                    free(prod_reduced_diag);
+                }
+                free(prod_diag);
+            }
+        }
+        
+        memcpy(step1_coeff, step1_crt, PARAM_N * sizeof(scalar));
+        coeffs_representation(step1_coeff, LOG_R);
+        freeze_poly(step1_coeff, PARAM_N - 1);
+        
+        printf("[Decrypt]   Step 1 (ω_A·C0) (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+               step1_coeff[0], step1_coeff[1], step1_coeff[2], step1_coeff[3]);
+    }
+    
+    poly beta_s0_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (beta_s0_coeff && step1_coeff) {
+        poly s_0_approx = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+        double_poly beta_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        poly beta_s0_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+        
+        if (beta_prod && beta_s0_crt) {
+            mul_crt_poly(beta_prod, mpk->beta, s_0_approx, LOG_R);
+            reduce_double_crt_poly(beta_s0_crt, beta_prod, LOG_R);
+            memcpy(beta_s0_coeff, beta_s0_crt, PARAM_N * sizeof(scalar));
+            coeffs_representation(beta_s0_coeff, LOG_R);
+            freeze_poly(beta_s0_coeff, PARAM_N - 1);
+            
+            printf("[Decrypt]   β·C0[0] ≈ β·s[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+                   beta_s0_coeff[0], beta_s0_coeff[1], beta_s0_coeff[2], beta_s0_coeff[3]);
+            
+            poly step1_plus_step2 = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (step1_plus_step2 && step2_coeff) {
+                memcpy(step1_plus_step2, step1_coeff, PARAM_N * sizeof(scalar));
+                add_poly(step1_plus_step2, step1_plus_step2, step2_coeff, PARAM_N - 1);
+                freeze_poly(step1_plus_step2, PARAM_N - 1);
+                
+                printf("[Decrypt]   Step 1 + Step 2 (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+                       step1_plus_step2[0], step1_plus_step2[1], step1_plus_step2[2], step1_plus_step2[3]);
+                
+                int mismatch_count = 0;
+                uint32_t max_diff = 0;
+                for (int k = 0; k < PARAM_N && k < 16; k++) {
+                    uint32_t diff = (step1_plus_step2[k] > beta_s0_coeff[k]) ? 
+                                   (step1_plus_step2[k] - beta_s0_coeff[k]) : 
+                                   (beta_s0_coeff[k] - step1_plus_step2[k]);
+                    if (diff > max_diff) max_diff = diff;
+                    if (diff > 1000000) {
+                        if (mismatch_count < 5) {
+                            printf("[Decrypt]   Large diff at coeff[%d]: (Step1+Step2)=%u, β·s[0]=%u, diff=%u\n",
+                                   k, step1_plus_step2[k], beta_s0_coeff[k], diff);
+                        }
+                        mismatch_count++;
+                    }
+                }
+                printf("[Decrypt]   Max difference: %u\n", max_diff);
+                if (mismatch_count == 0) {
+                    printf("[Decrypt]   ✓ Step 1 + Step 2 ≈ β·s[0] (within noise tolerance)\n");
+                } else {
+                    printf("[Decrypt]   ✗ Step 1 + Step 2 ≠ β·s[0] (%d large differences)\n", mismatch_count);
+                }
+                
+                free(step1_plus_step2);
+            }
+            
+            free(beta_prod);
+            free(beta_s0_crt);
+        }
+        free(beta_s0_coeff);
+    }
+    
+    printf("\n[Decrypt] DIAGNOSTIC: Analyzing Step 2 noise terms\n");
+    printf("[Decrypt]   Step 2 computes: ω[ρ(j)]·C[j] where C[j] = B+_attr · s[0] + e_j\n");
+    printf("[Decrypt]   This gives: ω[ρ(j)]·B+_attr · s[0] + ω[ρ(j)]·e_j\n");
+    printf("[Decrypt]   The noise term is: ω[ρ(j)]·e_j\n");
+    printf("[Decrypt]   Actual Step2 includes noise, Expected Step2 does not\n");
+    printf("[Decrypt]   Noise magnitude (diff between actual and expected):\n");
+    if (step2_coeff && expected_step2_coeff) {
+        uint32_t max_noise = 0;
+        for (int k = 0; k < PARAM_N && k < 16; k++) {
+            uint32_t noise = (step2_coeff[k] > expected_step2_coeff[k]) ? 
+                            (step2_coeff[k] - expected_step2_coeff[k]) : 
+                            (expected_step2_coeff[k] - step2_coeff[k]);
+            if (noise > max_noise) max_noise = noise;
+            if (k < 4) {
+                printf("[Decrypt]     coeff[%d]: noise=%u\n", k, noise);
+    }
+        }
+        printf("[Decrypt]   Max noise magnitude: %u (out of %u)\n", max_noise, PARAM_Q);
+        printf("[Decrypt]   Noise percentage: %.2f%%\n", (100.0 * max_noise) / PARAM_Q);
+    }
+    
+    printf("\n[Decrypt] DIAGNOSTIC: Final decryption term comparison\n");
+    printf("[Decrypt]   Final decryption_term (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+        decryption_term_coeff[0], decryption_term_coeff[1], decryption_term_coeff[2], decryption_term_coeff[3]);
+    printf("[Decrypt]   Note: decryption_term = β·C0[0] = β·s[0] + β·e0[0]\n");
+    printf("[Decrypt]   The noise term β·e0[0] may cause mismatch with encryption's β·s[0]\n");
+    
+    poly beta_c0_0_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (beta_c0_0_coeff) {
+        poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+        double_poly beta_c0_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        poly beta_c0_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+        
+        if (beta_c0_prod && beta_c0_crt) {
+            mul_crt_poly(beta_c0_prod, mpk->beta, c0_0, LOG_R);
+            reduce_double_crt_poly(beta_c0_crt, beta_c0_prod, LOG_R);
+            memcpy(beta_c0_0_coeff, beta_c0_crt, PARAM_N * sizeof(scalar));
+            coeffs_representation(beta_c0_0_coeff, LOG_R);
+            freeze_poly(beta_c0_0_coeff, PARAM_N - 1);
+            
+            printf("[Decrypt]   β·C0[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+                   beta_c0_0_coeff[0], beta_c0_0_coeff[1], beta_c0_0_coeff[2], beta_c0_0_coeff[3]);
+            
+            int mismatch_count = 0;
+            uint32_t max_diff = 0;
+            for (int k = 0; k < PARAM_N && k < 16; k++) {
+                uint32_t diff = (decryption_term_coeff[k] > beta_c0_0_coeff[k]) ? 
+                               (decryption_term_coeff[k] - beta_c0_0_coeff[k]) : 
+                               (beta_c0_0_coeff[k] - decryption_term_coeff[k]);
+                if (diff > max_diff) max_diff = diff;
+                if (diff > 1000 && diff < (PARAM_Q - 1000)) {
+                    if (mismatch_count < 5) {
+                        printf("[Decrypt]   Diff at coeff[%d]: decryption_term=%u, β·C0[0]=%u, diff=%u\n",
+                               k, decryption_term_coeff[k], beta_c0_0_coeff[k], diff);
+                    }
+                    mismatch_count++;
+                }
+            }
+            printf("[Decrypt]   Max difference between decryption_term and β·C0[0]: %u\n", max_diff);
+            if (mismatch_count == 0) {
+                printf("[Decrypt]   ✓ decryption_term matches β·C0[0] (within tolerance)\n");
+            } else {
+                printf("[Decrypt]   ✗ decryption_term differs from β·C0[0] (%d differences)\n", mismatch_count);
+            }
+            
+            free(beta_c0_prod);
+            free(beta_c0_crt);
+        }
+        free(beta_c0_0_coeff);
+    }
+    
+    printf("\n[Decrypt] DIAGNOSTIC: Measuring noise term β·e0[0] magnitude\n");
+    printf("[Decrypt]   Formula: β·e0[0] = β·C0[0] - β·s[0] = decryption_term - β·s[0]\n");
+    printf("[Decrypt]   Note: We don't have β·s[0] directly, but we can estimate it from β·C0[0]\n");
+    printf("[Decrypt]   Since C0[0] = s[0] + e0[0], we have: β·C0[0] = β·s[0] + β·e0[0]\n");
+    printf("[Decrypt]   Therefore: β·e0[0] = β·C0[0] - β·s[0]\n");
+    printf("[Decrypt]   We'll measure the magnitude of β·C0[0] and compare with encoding tolerance\n");
+    
+    uint32_t max_decryption_term = 0;
+    uint32_t min_decryption_term = PARAM_Q;
+    for (int i = 0; i < PARAM_N; i++) {
+        if (decryption_term_coeff[i] > max_decryption_term) max_decryption_term = decryption_term_coeff[i];
+        if (decryption_term_coeff[i] < min_decryption_term) min_decryption_term = decryption_term_coeff[i];
+    }
+    printf("[Decrypt]   decryption_term (β·C0[0]) magnitude:\n");
+    printf("[Decrypt]     Max coefficient: %u (0x%x)\n", max_decryption_term, max_decryption_term);
+    printf("[Decrypt]     Min coefficient: %u (0x%x)\n", min_decryption_term, min_decryption_term);
+    
+    const uint32_t shift_diag = PARAM_K - 8;
+    const uint32_t encoding_tolerance = 1U << shift_diag;  // 2^shift_diag
+    const uint32_t half_tolerance = encoding_tolerance / 2;
+    printf("[Decrypt]   Encoding tolerance (2^%u): %u (0x%x)\n", shift_diag, encoding_tolerance, encoding_tolerance);
+    printf("[Decrypt]   Half tolerance: %u (0x%x)\n", half_tolerance, half_tolerance);
+    
+    if (max_decryption_term > encoding_tolerance) {
+        printf("[Decrypt]   ⚠ WARNING: Max coefficient (%u) exceeds encoding tolerance (%u)\n", 
+               max_decryption_term, encoding_tolerance);
+        printf("[Decrypt]   This may cause k_log corruption in high bits\n");
+    } else {
+        printf("[Decrypt]   ✓ Max coefficient is within encoding tolerance\n");
+    }
+    
+    printf("[Decrypt]   To compute β·e0[0] exactly, we need β·s[0] from encryption\n");
+    printf("[Decrypt]   This will be compared in the next diagnostic section\n");
+    
+    printf("[Decrypt NOISE DIAG] decryption_term (β·C0[0]) (COEFF, full):");
+    for (int i = 0; i < PARAM_N; i++) {
+        printf(" %u", decryption_term_coeff[i]);
+    }
+    printf("\n");
+    printf("[Decrypt NOISE DIAG] decryption_term max coefficient: %u (0x%x)\n", max_decryption_term, max_decryption_term);
+    poly beta_e0_0_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (beta_e0_0_coeff) {
+        poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+        double_poly beta_c0_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        poly beta_c0_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+        
+        if (beta_c0_prod && beta_c0_crt) {
+            mul_crt_poly(beta_c0_prod, mpk->beta, c0_0, LOG_R);
+            reduce_double_crt_poly(beta_c0_crt, beta_c0_prod, LOG_R);
+            memcpy(beta_e0_0_coeff, beta_c0_crt, PARAM_N * sizeof(scalar));
+            coeffs_representation(beta_e0_0_coeff, LOG_R);
+            freeze_poly(beta_e0_0_coeff, PARAM_N - 1);
+            
+            uint32_t max_coeff_magnitude = 0;
+            for (int k = 0; k < PARAM_N && k < AES_KEY_SIZE; k++) {
+                uint32_t coeff = beta_e0_0_coeff[k];
+                if (coeff > PARAM_Q / 2) coeff = PARAM_Q - coeff;
+                if (coeff > max_coeff_magnitude) max_coeff_magnitude = coeff;
+            }
+            
+            printf("[Decrypt]   Estimated max |β·C0[0]| coefficient magnitude (first %d): %u\n", 
+                   AES_KEY_SIZE, max_coeff_magnitude);
+            printf("[Decrypt]   With reduced e0[0] noise (σ=%.2f), this should be smaller\n", 0.5 * PARAM_SIGMA);
+            printf("[Decrypt]   Shift for k_log extraction: %d bits (PARAM_K - 8)\n", PARAM_K - 8);
+            printf("[Decrypt]   Max noise that can be tolerated: ~%u (before affecting high bits)\n", 
+                   (uint32_t)(1ULL << (PARAM_K - 8 - 1)));  // Half of the shift amount
+            
+            free(beta_c0_prod);
+            free(beta_c0_crt);
+        }
+        free(beta_e0_0_coeff);
+    }
+    
+    printf("\n[Decrypt] DIAGNOSTIC: Noise Analysis Summary\n");
+    printf("[Decrypt]   ============================================\n");
+    printf("[Decrypt]   To compute β·e0[0] exactly:\n");
+    printf("[Decrypt]   1. Extract β·s[0] from encryption output (tag: [ENCRYPT NOISE DIAG])\n");
+    printf("[Decrypt]   2. Extract decryption_term from this output (tag: [Decrypt NOISE DIAG])\n");
+    printf("[Decrypt]   3. Compute: β·e0[0] = decryption_term - β·s[0]\n");
+    printf("[Decrypt]   4. Check if max(|β·e0[0]|) > 2^%u (encoding tolerance)\n", PARAM_K - 8);
+    printf("[Decrypt]   ============================================\n");
+    printf("[Decrypt]   Current measurements:\n");
+    printf("[Decrypt]     - decryption_term max: %u (0x%x)\n", max_decryption_term, max_decryption_term);
+    printf("[Decrypt]     - Encoding tolerance: %u (2^%u)\n", encoding_tolerance, shift_diag);
+    printf("[Decrypt]     - Status: %s\n", 
+           (max_decryption_term > encoding_tolerance) ? "⚠ EXCEEDS TOLERANCE" : "✓ WITHIN TOLERANCE");
+    printf("[Decrypt]   ============================================\n");
+    
+    printf("[Decrypt] DIAGNOSTIC: End final comparison\n");
+    
+    if (step1_crt) free(step1_crt);
+    if (step1_coeff) free(step1_coeff);
+    if (step2_coeff) free(step2_coeff);
+    if (expected_step2_coeff) free(expected_step2_coeff);
+    
+    free(step2_contributions_crt);
+    free(expected_step2_crt);
 
-    /* Optional provenance tracing: recompute per-term contributions but only
-     * for a small set of coefficient indices so we can observe which prod
-     * terms contribute to each coefficient and the running accumulator.
-     * Enabled by setting ARITH_PROVENANCE in the environment. This is more
-     * expensive but keeps earlier hot path logic unchanged. */
     if (getenv("ARITH_PROVENANCE")) {
-        /* default watch indices: 0..7, 16, 31 */
         int watch_idx[] = {0,1,2,3,4,5,6,7,16,31};
         int nwatch = sizeof(watch_idx)/sizeof(watch_idx[0]);
         printf("[DECRYPT PROV] Running provenance tracing for indices:");
         for (int wi = 0; wi < nwatch; wi++) printf(" %d", watch_idx[wi]);
         printf("\n");
 
-        /* accumulators for watched indices */
         long long accum[10];
         for (int a = 0; a < nwatch; a++) accum[a] = 0;
 
@@ -543,7 +735,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
             reduce_double_crt_poly(prod_reduced, prod, LOG_R);
 
-            /* print the watched indices from this prod_reduced and update accum */
             printf("[DECRYPT PROV] Step1 j=%u contributions:", j);
             for (int w = 0; w < nwatch; w++) {
                 int idx = watch_idx[w];
@@ -562,7 +753,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         printf("\n");
 
         printf("[DECRYPT PROV] Replaying Step2 (policy attribute contributions)\n");
-        /* Step2 replay: iterate policy rows similarly to above; update accum */
         for (uint32_t i = 0; i < n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
             uint32_t policy_attr_idx = ct_abe->policy.rho[i];
             int omega_idx = -1;
@@ -571,7 +761,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             }
             if (omega_idx == -1) continue;
 
-            /* temp accumulator for this attribute, but we only care about watched indices */
             long long temp_accum[10];
             for (int a = 0; a < nwatch; a++) temp_accum[a] = 0;
 
@@ -583,7 +772,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                 poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
                 reduce_double_crt_poly(prod_reduced, prod, LOG_R);
 
-                /* update temp_accum for watched indices */
                 for (int w = 0; w < nwatch; w++) {
                     int idx = watch_idx[w];
                     temp_accum[w] = (temp_accum[w] + (long long)prod_reduced[idx]) % PARAM_Q;
@@ -593,7 +781,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                 free(prod_reduced);
             }
 
-            /* multiply temp_accum by reconstruction coefficient and add to global accum */
             uint32_t coeff = coefficients[i];
             printf("[DECRYPT PROV] Attr %u (policy row %u) pre-mul contributions:", policy_attr_idx, i);
             for (int w = 0; w < nwatch; w++) {
@@ -610,14 +797,7 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         printf("\n");
     }
 
-    /* decryption_term_coeff now holds the aggregated decryption term in
-     * COEFFICIENT domain; we will subtract it directly from ct_key (which
-     * is also COEFFICIENT) below. */
-    
-    // Step 3: Subtract decryption_term from ct_key to recover encode(K_log) + small_error
     printf("\n[Decrypt]   Step 3: Subtracting to extract K_log\n");
-    /* Provenance: print pre-subtraction ct_key values for a small set of indices
-     * so we can later correlate with post-subtraction and rounding. */
     if (getenv("ARITH_PROVENANCE")) {
         int watch_idx[] = {0,1,2,3,4,5,6,7,16,31};
         int nwatch = sizeof(watch_idx)/sizeof(watch_idx[0]);
@@ -626,9 +806,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
             int idx = watch_idx[w];
             printf("  idx=%d ct_key=%u\n", idx, ct_abe->ct_key[idx]);
         }
-        /* Compute a compact FNV-1a 64-bit hash of the ct_key vector right
-         * before subtraction so we can diff with the early hash printed above
-         * and identify when/if the buffer was mutated. */
         uint64_t fnv_late = 1469598103934665603ULL;
         for (int _i = 0; _i < PARAM_N; _i++) {
             uint64_t v2 = (uint64_t)ct_abe->ct_key[_i];
@@ -640,8 +817,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
         }
         printf("[DECRYPT PROV] Pre-subtraction ct_key FNV64=0x%016" PRIx64 "\n", fnv_late);
     }
-    /* If in minimal provenance mode, print only pointer and compact FNV64 here
-     * (pre-subtraction) and avoid the heavy per-index prints. */
     if (getenv("ARITH_MIN_PROV")) {
         uint64_t fnv_late_min = 1469598103934665603ULL;
         for (int _i = 0; _i < PARAM_N; _i++) {
@@ -656,9 +831,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     for (uint32_t i = 0; i < PARAM_N; i++) {
         recovered[i] = (recovered[i] + PARAM_Q - decryption_term_coeff[i]) % PARAM_Q;
     }
-    /* Diagnostic: dump the recovered vector after subtraction (this should be
-     * approximately encode(K_log) + small error). Compare this with the
-     * encryption-side encoded_Klog_coeff_full to localize any mismatch. */
     if (getenv("ARITH_DUMP_FULL")) {
         printf("[DECRYPT DUMP FULL] recovered_after_subtraction_full:\n");
         for (int _i = 0; _i < PARAM_N; _i++) printf(" %u", recovered[_i]);
@@ -670,11 +842,6 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     printf("[Decrypt]   In HEX: [0]=0x%08x, [1]=0x%08x, [2]=0x%08x, [3]=0x%08x\n",
            recovered[0], recovered[1], recovered[2], recovered[3]);
     
-    /* Provenance: for watched indices, print the detailed subtraction and
-     * centered rounding steps so we can compare with encryption-side encoded
-     * K_log coefficients. This prints: ct_key, decryption_term (COEFF),
-     * recovered = (ct_key - decryption_term) mod Q, centered value,
-     * rounded value, and extracted byte. */
     if (getenv("ARITH_PROVENANCE")) {
         int watch_idx[] = {0,1,2,3,4,5,6,7,16,31};
         int nwatch = sizeof(watch_idx)/sizeof(watch_idx[0]);
@@ -699,49 +866,50 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                    idx, ctval, term, diff, (long long)centered, (long long)rounded, byte);
         }
     }
-    // Extract K_log by rounding to nearest byte value
-    // Use centered lift: if recovered[i] > Q/2, treat as negative (recovered[i] - Q)
-    printf("[Decrypt]   Extracting K_log using centered modular reduction:\n");
-    printf("[Decrypt]   ");
-    const uint32_t shift = PARAM_K - 8;  // 30 - 8 = 22 bits
+    const uint32_t shift = PARAM_K - 8;
     const uint32_t Q_half = PARAM_Q / 2;
-    for (int i = 0; i < 8; i++) {
-        // Centered lift: map [0, Q) to [-Q/2, Q/2)
-        int64_t centered = (int64_t)recovered[i];
-        if (centered > Q_half) {
-            centered -= PARAM_Q;
+    const uint32_t redundancy = 3;
+    const uint32_t spacing = 16;
+    
+    printf("[Decrypt]   Extracting K_log with redundant encoding (redundancy=%u, spacing=%u):\n", redundancy, spacing);
+    printf("[Decrypt]   ");
+    
+    for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
+        int64_t sum_rounded = 0;
+        uint32_t valid_count = 0;
+        
+        for (uint32_t rep = 0; rep < redundancy; rep++) {
+            uint32_t pos = i + rep * spacing;
+            if (pos >= PARAM_N) break;
+            
+            int64_t centered = (int64_t)recovered[pos];
+            if (centered > Q_half) {
+                centered -= PARAM_Q;
+            }
+            
+            int64_t rounded;
+            if (centered >= 0) {
+                rounded = (centered + (1LL << (shift - 1))) >> shift;
+            } else {
+                rounded = -((-centered + (1LL << (shift - 1))) >> shift);
+            }
+            
+            sum_rounded += rounded;
+            valid_count++;
         }
-        // Round to nearest: add 2^(shift-1) before right-shifting
-        // Handle negative values correctly
-        int64_t rounded;
-        if (centered >= 0) {
-            rounded = (centered + (1LL << (shift - 1))) >> shift;
-        } else {
-            // For negative: round toward zero after shift
-            rounded = -((-centered + (1LL << (shift - 1))) >> shift);
+        
+        int64_t avg_rounded = (sum_rounded + valid_count / 2) / valid_count;
+        uint8_t byte = (uint8_t)(avg_rounded & 0xFF);
+        key_out[i] = byte;
+        
+        if (i < 8) {
+            printf("%02x ", byte);
         }
-        printf("%02x ", (uint8_t)(rounded & 0xFF));
     }
     printf("\n");
     
-    // Extract full K_log using centered modular reduction
-    for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
-        // Centered lift
-        int64_t centered = (int64_t)recovered[i];
-        if (centered > Q_half) {
-            centered -= PARAM_Q;
-        }
-        // Round to nearest
-        int64_t rounded;
-        if (centered >= 0) {
-            rounded = (centered + (1LL << (shift - 1))) >> shift;
-        } else {
-            rounded = -((-centered + (1LL << (shift - 1))) >> shift);
-        }
-        key_out[i] = (uint8_t)(rounded & 0xFF);
-    }
-    
     free(recovered);
+    free(decryption_term_crt);
     free(decryption_term_coeff);
     
     printf("[Decrypt] K_log recovered successfully (first 16 bytes): ");
@@ -1030,6 +1198,8 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
         return -1;
     }
     
+
+    
     // Read rho
     uint32_t matrix_rows;
     if (fread(&matrix_rows, sizeof(uint32_t), 1, fp) != 1) {
@@ -1091,8 +1261,7 @@ int decrypt_ctobj_batch(const char **filenames,
     printf("\n=== Batch Decryption with Policy Reuse ===\n");
     printf("[Decrypt] Processing %d CT_obj files\n", n_files);
     
-    // Cache for policy-key pairs (optimization from Phase 6 spec)
-    PolicyKeyCache cache[100];  // Support up to 100 unique policies
+    PolicyKeyCache cache[100];
     uint32_t n_cached = 0;
     
     uint32_t success_count = 0;
@@ -1113,25 +1282,10 @@ int decrypt_ctobj_batch(const char **filenames,
         printf("[Decrypt]   User: %s, Timestamp: %s\n", 
                log.metadata.user_id, log.metadata.timestamp);
         
-        // CRITICAL FIX: Each log has UNIQUE K_log encoded in ct_key
-        // Cannot cache K_log by policy alone - must decrypt each ct_key independently
-        // The batch optimization shares C0/C[i], but ct_key is unique per log!
         uint8_t k_log[AES_KEY_SIZE];
-        int found_in_cache = 0;  // DISABLED: Force decryption for each unique ct_key
+        int found_in_cache = 0;
         
-        // CACHE DISABLED - Each file has unique K_log
-        // for (uint32_t c = 0; c < n_cached; c++) {
-        //     if (strcmp(cache[c].policy, log.ct_abe.policy.expression) == 0 && cache[c].valid) {
-        //         memcpy(k_log, cache[c].k_log, AES_KEY_SIZE);
-        //         found_in_cache = 1;
-        //         cache_hits++;
-        //         printf("[Decrypt]   Cache HIT! Reusing K_log from policy cache\n");
-        //         break;
-        //     }
-        // }
-        
-        if (!found_in_cache) {  // Always true now
-            // Cache miss - perform LCP-ABE decryption
+        if (!found_in_cache) {
             printf("[Decrypt]   Cache MISS - Performing LCP-ABE decryption...\n");
             
             int decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
@@ -1147,7 +1301,6 @@ int decrypt_ctobj_batch(const char **filenames,
             printf("[Decrypt]   LCP-ABE decryption succeeded!\n");
             abe_decryptions++;
             
-            // Add to cache
             if (n_cached < 100) {
                 strncpy(cache[n_cached].policy, log.ct_abe.policy.expression, MAX_POLICY_SIZE);
                 memcpy(cache[n_cached].k_log, k_log, AES_KEY_SIZE);
@@ -1157,7 +1310,6 @@ int decrypt_ctobj_batch(const char **filenames,
             }
         }
         
-        // Decrypt symmetric ciphertext using K_log
         uint8_t *log_data = NULL;
         size_t log_len = 0;
         
@@ -1178,7 +1330,6 @@ int decrypt_ctobj_batch(const char **filenames,
         printf("%.*s\n", (int)log_len, log_data);
         printf("[Decrypt]   \n");
         
-        // Save decrypted log
         if (output_dir) {
             char output_filename[512];
             snprintf(output_filename, sizeof(output_filename), 
@@ -1197,7 +1348,6 @@ int decrypt_ctobj_batch(const char **filenames,
         success_count++;
     }
     
-    // Print statistics
     printf("\n");
     printf("=== Decryption Statistics ===\n");
     printf("Total CT_obj files processed: %d\n", n_files);
