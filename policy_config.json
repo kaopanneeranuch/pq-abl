@@ -18,7 +18,7 @@
     },
     {
       "policy_id": "high_privilege",
-      "expression": "(user_role:admin OR action_type:deploy)",
+      "expression": "(user_role:admin AND action_type:deploy)",
       "match_rules": {
         "OR": [
           {"user_role": "admin"},

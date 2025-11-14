@@ -151,7 +151,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
     freeze_poly(target_0, PARAM_N - 1);
     
-    printf("[KeyGen]   Target = β - Σ(B[i]·ω[i]) \n");
+    printf("[KeyGen]   Target = β - Σ(B+_i · ω_i)[0] \n");
     printf("[KeyGen]   DEBUG: beta (first 4): %u %u %u %u\n",
            mpk->beta[0], mpk->beta[1], mpk->beta[2], mpk->beta[3]);
     printf("[KeyGen]   DEBUG: sum_term (first 4): %u %u %u %u\n",

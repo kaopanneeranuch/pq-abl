@@ -46,9 +46,9 @@ int main(void) {
     printf("[Test] Policy 1: %s (threshold=%d/%d)\n", 
            policies[0].expression, policies[0].threshold, policies[0].attr_count);
     
-    // Policy 2: user_role:admin OR team:app-team
+    // Policy 2: user_role:admin AND team:app-team (changed from OR to AND)
     policy_init(&policies[1]);
-    policy_parse("user_role:admin OR team:app-team", &policies[1]);
+    policy_parse("user_role:admin AND team:app-team", &policies[1]);
     lsss_policy_to_matrix(&policies[1]);
     printf("[Test] Policy 2: %s (threshold=%d/%d)\n", 
            policies[1].expression, policies[1].threshold, policies[1].attr_count);

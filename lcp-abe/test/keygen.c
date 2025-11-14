@@ -6,16 +6,14 @@
 #include "lcp-abe/keygen/lcp_keygen.h"
 #include "lcp-abe/policy/lcp_policy.h"
 #include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
+#include "module_gaussian_lattice/Module_BFRS/sampling.h"
 
 int main(void) {
     // Initialize Module_BFRS components (required for CRT operations)
     printf("[KeyGen Test] Initializing Module_BFRS...\n");
     init_crt_trees();
     init_cplx_roots_of_unity();
-    /* init_D_lattice_coeffs() was removed/never implemented in Module_BFRS
-     * Some older setups called it; current arithmetic module doesn't expose
-     * such function. Omit the call to keep the tests portable across
-     * platforms/builds. */
+    init_D_lattice_coeffs();  // REQUIRED: Initialize l_coeffs, d_coeffs, h_coeffs for sampling
     
     MasterPublicKey mpk;
     MasterSecretKey msk;

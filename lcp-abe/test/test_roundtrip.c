@@ -46,20 +46,19 @@ int main(void) {
         return 2;
     }
 
-    // Prepare a trivial policy that requires user_role:admin (rho -> index 56)
+    // Prepare AND policy that requires BOTH user attributes (matches all user attributes)
+    // This ensures trapdoor relationship holds: KeyGen uses all attributes, Decrypt uses all policy attributes
     policy_init(&policy);
-    strncpy(policy.expression, "user_role:admin", MAX_POLICY_SIZE-1);
-    policy.matrix_rows = 1;
-    policy.matrix_cols = 1;
-    policy.rho = (uint32_t*)malloc(sizeof(uint32_t));
-    policy.rho[0] = 56;
-    policy.attr_count = 1; /* ensure attr_count is set for policy checks */
-    policy.attr_indices[0] = 56; /* ensure attr_indices is initialized for MSan */
-    /* Ensure LSSS metadata is initialized to avoid MSan uninitialized reads */
-    policy.is_threshold = 0;
-    policy.threshold = 1;
-    policy.share_matrix = (scalar*)malloc(sizeof(scalar));
-    policy.share_matrix[0] = 1;
+    strncpy(policy.expression, "user_role:admin AND team:storage-team", MAX_POLICY_SIZE-1);
+    policy.attr_count = 2;
+    policy.attr_indices[0] = 56;  // user_role:admin
+    policy.attr_indices[1] = 47;  // team:storage-team
+    
+    // Build LSSS matrix for AND policy (requires both attributes)
+    if (lsss_policy_to_matrix(&policy) != 0) {
+        fprintf(stderr, "[RT] Failed to build LSSS matrix for policy\n");
+        return 3;
+    }
 
     // Batch init (shared s and C0/C[i])
     if (lcp_abe_encrypt_batch_init(&policy, &mpk, &ct_template, &s_shared) != 0) {

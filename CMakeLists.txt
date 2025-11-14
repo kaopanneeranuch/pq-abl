@@ -109,8 +109,9 @@ endif()
 add_executable(test_decrypt lcp-abe/test/decrypt.c)
 target_link_libraries(test_decrypt lcp_abe)
 
-add_executable(test_verify_keygen lcp-abe/test/verify_keygen.c)
-target_link_libraries(test_verify_keygen lcp_abe)
+# Removed test_verify_keygen - file doesn't exist
+# add_executable(test_verify_keygen lcp-abe/test/verify_keygen.c)
+# target_link_libraries(test_verify_keygen lcp_abe)
 
 # Linearity diagnostic: test coeffs_representation linearity
 add_executable(coeffs_linearity lcp-abe/test/coeffs_linearity.c)

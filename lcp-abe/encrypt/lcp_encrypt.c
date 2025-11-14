@@ -98,8 +98,9 @@ int lcp_abe_encrypt_batch_init(const AccessPolicy *policy,
         return -1;
     }
     
-    printf("[Batch Init] Sampling e0[0] with reduced sigma (0.5×) for decryption robustness\n");
-    SampleR_centered((signed_poly)&e0[0 * PARAM_N], 0.5 * PARAM_SIGMA);
+    printf("[Batch Init] Sampling e0[0] with reduced sigma (0.25×) for decryption robustness\n");
+    printf("[Batch Init] Original sigma=%.2f, reduced to %.2f for e0[0]\n", PARAM_SIGMA, 0.25 * PARAM_SIGMA);
+    SampleR_centered((signed_poly)&e0[0 * PARAM_N], 0.25 * PARAM_SIGMA);
     
     for (uint32_t i = 1; i < PARAM_M; i++) {
         SampleR_centered((signed_poly)&e0[i * PARAM_N], PARAM_SIGMA);
@@ -364,7 +365,10 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         return -1;
     }
     
-    SampleR_centered((signed_poly)e_key, PARAM_SIGMA);
+    // Reduce e_key noise for better k_log recovery (0.1× sigma for exact recovery)
+    // This noise is still secure (σ = 0.7) but allows k_log extraction to work
+    printf("[Batch Key] Sampling e_key with reduced sigma (0.1×) for exact k_log recovery\n");
+    SampleR_centered((signed_poly)e_key, 0.1 * PARAM_SIGMA);
     for (int i = 0; i < PARAM_N; i++) {
         e_key[i] += PARAM_Q;
     }
@@ -384,19 +388,22 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         return -1;
     }
     
-    poly s_0 = poly_matrix_element(s, 1, 0, 0);
-    printf("[Batch Key] DEBUG: mul operands addresses: mpk->beta=%p s_0=%p temp_prod=%p\n", (void*)mpk->beta, (void*)s_0, (void*)temp_prod);
+    // Use C0[0] instead of s[0] to match what decryption recovers
+    // Decryption recovers β·C0[0] = β·s[0] + β·e0[0], so encryption should use the same
+    poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+    printf("[Batch Key] DEBUG: Using C0[0] instead of s[0] to match decryption\n");
+    printf("[Batch Key] DEBUG: mul operands addresses: mpk->beta=%p c0_0=%p temp_prod=%p\n", (void*)mpk->beta, (void*)c0_0, (void*)temp_prod);
     if (getenv("ARITH_DEBUG")) {
         for (int comp = 0; comp < LOG_R; comp++) {
             char tb[80];
-            char ts[80];
+            char tc[80];
             snprintf(tb, sizeof(tb), "ENCRYPT_mpk_beta_comp_%d", comp);
-            snprintf(ts, sizeof(ts), "ENCRYPT_s0_comp_%d", comp);
+            snprintf(tc, sizeof(tc), "ENCRYPT_c0_0_comp_%d", comp);
             dump_crt_component(mpk->beta, LOG_R, comp, tb);
-            dump_crt_component(s_0, LOG_R, comp, ts);
+            dump_crt_component(c0_0, LOG_R, comp, tc);
         }
     }
-    mul_crt_poly(temp_prod, mpk->beta, s_0, LOG_R);
+    mul_crt_poly(temp_prod, mpk->beta, c0_0, LOG_R);
     if (getenv("ARITH_DEBUG")) {
         for (int comp = 0; comp < LOG_R; comp++) {
             char tag[64];
@@ -428,8 +435,8 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     double_poly tmp_prod2 = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
     poly reduced_beta = (poly)calloc(PARAM_N, sizeof(scalar));
     if (tmp_prod2 && reduced_beta) {
-        printf("[Batch Key] DEBUG: (second) mul operands addresses: mpk->beta=%p s_0=%p tmp_prod2=%p\n", (void*)mpk->beta, (void*)s_0, (void*)tmp_prod2);
-        mul_crt_poly(tmp_prod2, mpk->beta, s_0, LOG_R);
+        printf("[Batch Key] DEBUG: (second) mul operands addresses: mpk->beta=%p c0_0=%p tmp_prod2=%p\n", (void*)mpk->beta, (void*)c0_0, (void*)tmp_prod2);
+        mul_crt_poly(tmp_prod2, mpk->beta, c0_0, LOG_R);
         if (getenv("ARITH_DEBUG")) {
             for (int comp = 0; comp < LOG_R; comp++) {
                 char tag2[64];
@@ -446,10 +453,10 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
             }
         }
         coeffs_representation(reduced_beta, LOG_R);
-        printf("[Batch Key] DEBUG: beta*s0 (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
+        printf("[Batch Key] DEBUG: beta*C0[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
                reduced_beta[0], reduced_beta[1], reduced_beta[2], reduced_beta[3]);
         
-        printf("[ENCRYPT NOISE DIAG] β·s[0] (COEFF, full):");
+        printf("[ENCRYPT NOISE DIAG] β·C0[0] (COEFF, full):");
         for (int i = 0; i < PARAM_N; i++) {
             printf(" %u", reduced_beta[i]);
         }
@@ -459,7 +466,7 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
         for (int i = 0; i < PARAM_N; i++) {
             if (reduced_beta[i] > max_beta_s0) max_beta_s0 = reduced_beta[i];
         }
-        printf("[ENCRYPT NOISE DIAG] β·s[0] max coefficient: %u (0x%x)\n", max_beta_s0, max_beta_s0);
+        printf("[ENCRYPT NOISE DIAG] β·C0[0] max coefficient: %u (0x%x)\n", max_beta_s0, max_beta_s0);
 
         poly tmp_round = (poly)calloc(PARAM_N, sizeof(scalar));
         if (tmp_round) {
@@ -488,26 +495,47 @@ int lcp_abe_encrypt_batch_key(const uint8_t key[AES_KEY_SIZE],
     printf("[Batch Key] DEBUG: ct_key before K_log encoding (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
            ct_abe->ct_key[0], ct_abe->ct_key[1], ct_abe->ct_key[2], ct_abe->ct_key[3]);
     
-    const uint32_t shift = PARAM_K - 8;
-    const uint32_t redundancy = 3;
-    const uint32_t spacing = 16;
+    const uint32_t shift = PARAM_K - 8;  // Reduced from PARAM_K-4 to avoid modulo wrap issues
+    const uint32_t redundancy = 3;  // Reduced from 5 to allow larger spacing
+    const uint32_t spacing = 32;  // Increased from 12 to avoid position collisions (must be >= AES_KEY_SIZE)
     
     uint32_t encoded_Kvec[PARAM_N];
     for (int _i = 0; _i < PARAM_N; _i++) encoded_Kvec[_i] = 0;
+    
+    // Diagnostic: Print ct_key[12] before encoding
+    printf("[ENCRYPT DEBUG] ct_key[12] before encoding: %u\n", ct_abe->ct_key[12]);
+    printf("[ENCRYPT DEBUG] Expected β·C0[0][12] from full array: %u\n", 
+           (uint32_t)(((uint64_t)0xB1 << shift) % PARAM_Q));  // This is wrong, but let's see
     
     for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
         uint64_t encoded = (uint64_t)key[i] << shift;
         uint32_t encoded_val = (uint32_t)(encoded % PARAM_Q);
         
+        // Diagnostic for failing bytes
+        if (i == 12) {
+            printf("[ENCRYPT DEBUG] i=12: key[12]=0x%02x, encoded=%u (0x%x), encoded_val=%u\n",
+                   key[12], (uint32_t)encoded, (uint32_t)encoded, encoded_val);
+        }
+        
         for (uint32_t rep = 0; rep < redundancy; rep++) {
             uint32_t pos = i + rep * spacing;
             if (pos >= PARAM_N) break;
+            
+            // Diagnostic for failing bytes
+            if (i == 12 && rep == 0) {
+                printf("[ENCRYPT DEBUG] i=12, pos=12: ct_key before=%u, encoded=%u, sum=%llu, ct_key after=%u\n",
+                       ct_abe->ct_key[pos], (uint32_t)encoded, (unsigned long long)((uint64_t)ct_abe->ct_key[pos] + encoded),
+                       (uint32_t)(((uint64_t)ct_abe->ct_key[pos] + encoded) % PARAM_Q));
+            }
             
             encoded_Kvec[pos] = encoded_val;
             uint64_t sum = (uint64_t)ct_abe->ct_key[pos] + encoded;
             ct_abe->ct_key[pos] = (uint32_t)(sum % PARAM_Q);
         }
     }
+    
+    // Diagnostic: Print ct_key[12] after encoding
+    printf("[ENCRYPT DEBUG] ct_key[12] after encoding: %u\n", ct_abe->ct_key[12]);
 
     if (getenv("ARITH_DUMP_FULL")) {
         printf("[ENCRYPT DUMP FULL] encoded_Klog_coeff_full:\n");

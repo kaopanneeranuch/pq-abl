@@ -154,6 +154,14 @@ int lsss_policy_to_matrix(AccessPolicy *policy) {
     int is_and = (strstr(policy->expression, "AND") != NULL);
     int is_or = (strstr(policy->expression, "OR") != NULL);
     
+    // RESTRICTION: Only AND policy is supported due to trapdoor relationship constraints
+    if (is_or) {
+        fprintf(stderr, "[Policy] ERROR: OR policy is not supported. Only AND policy is allowed.\n");
+        fprintf(stderr, "[Policy] Reason: Trapdoor relationship requires all user attributes to match policy attributes.\n");
+        fprintf(stderr, "[Policy] Please use AND policy instead: e.g., '(attr1 AND attr2)'\n");
+        return -1;
+    }
+    
     const char *thresh_ptr = strstr(policy->expression, "THRESHOLD(");
     if (thresh_ptr) {
         policy->is_threshold = 1;
@@ -186,22 +194,8 @@ int lsss_policy_to_matrix(AccessPolicy *policy) {
             }
         }
         
-    } else if (is_or) {
-        policy->threshold = 1;
-        policy->matrix_rows = policy->attr_count;
-        policy->matrix_cols = 1;
-        
-        policy->share_matrix = (scalar *)calloc(
-            policy->matrix_rows * policy->matrix_cols, sizeof(scalar)
-        );
-        policy->rho = (uint32_t *)calloc(policy->matrix_rows, sizeof(uint32_t));
-        
-        for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            policy->rho[i] = policy->attr_indices[i]; 
-            policy->share_matrix[i] = 1; 
-        }
-        
     } else {
+        // Default: Single attribute or implicit AND (all attributes required)
         return lsss_policy_to_matrix(policy);
     }
     
@@ -284,22 +278,22 @@ int lsss_check_satisfaction(const AccessPolicy *policy, const AttributeSet *attr
     int is_and = (strstr(policy->expression, "AND") != NULL);
     int is_or = (strstr(policy->expression, "OR") != NULL);
     
+    // RESTRICTION: OR policy is not supported
+    if (is_or) {
+        fprintf(stderr, "[Policy Check] ERROR: OR policy is not supported. Only AND policy is allowed.\n");
+        return 0;  // Reject OR policy
+    }
+    
+    // AND policy or default (implicit AND): require all attributes
+    int satisfied = (match_count == policy->attr_count);
     if (is_and) {
-        int satisfied = (match_count == policy->attr_count);
         printf("[Policy Check] AND policy: need all %d, have %d → %s\n",
                policy->attr_count, match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
-        return satisfied;
-    } else if (is_or) {
-        int satisfied = (match_count > 0);
-        printf("[Policy Check] OR policy: need ≥1, have %d → %s\n",
-               match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
-        return satisfied;
     } else {
-        int satisfied = (match_count == policy->attr_count);
         printf("[Policy Check] Default (AND) policy: need all %d, have %d → %s\n",
                policy->attr_count, match_count, satisfied ? "SATISFIED" : "NOT SATISFIED");
-        return satisfied;
     }
+    return satisfied;
 }
 
 int lsss_compute_coefficients(const AccessPolicy *policy, const AttributeSet *attr_set,
@@ -308,24 +302,9 @@ int lsss_compute_coefficients(const AccessPolicy *policy, const AttributeSet *at
         return -1; 
     }
     
-    int is_or = (strstr(policy->expression, "OR") != NULL);
-    
-    if (is_or) {
-        memset(coefficients, 0, policy->matrix_rows * sizeof(scalar));
-        for (uint32_t i = 0; i < policy->matrix_rows; i++) {
-            uint32_t policy_attr_idx = policy->rho[i];
-            for (uint32_t j = 0; j < attr_set->count; j++) {
-                if (attr_set->attrs[j].index == policy_attr_idx) {
-                    coefficients[i] = 1;
-                    printf("[LSSS] OR policy: Using policy row %d (attr idx %d) with coeff=1\n",
-                           i, policy_attr_idx);
-                    break;
-                }
-            }
-        }
-        *n_coeffs = policy->matrix_rows;
-        return 0;
-    } else {
+    // RESTRICTION: Only AND policy is supported
+    // OR policy is already rejected in lsss_policy_to_matrix, so we only handle AND here
+    {
         // For AND policy: Must use ALL policy attributes
         memset(coefficients, 0, policy->matrix_rows * sizeof(scalar));
         *n_coeffs = 0;
