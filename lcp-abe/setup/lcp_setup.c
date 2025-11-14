@@ -9,28 +9,17 @@
 int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk) {
     static int initialized = 0;
     if (!initialized) {
-        printf("[Setup] Initializing Module-LWE cryptographic primitives...\n");
         init_crt_trees();
         init_cplx_roots_of_unity();
         init_D_lattice_coeffs();
         initialized = 1;
     }
-
-    printf("[Setup] ==========================================\n");
-    printf("[Setup] Security parameter λ: %d-bit\n", PARAM_K);
-    printf("[Setup] Module rank k: %d\n", PARAM_D);
-    printf("[Setup] Module dimension m: %d\n", PARAM_M);
-    printf("[Setup] Polynomial degree n: %d\n", PARAM_N);
-    printf("[Setup] Modulus q: %d\n", PARAM_Q);
-    printf("[Setup] Gaussian parameter σ: %.2f\n", PARAM_SIGMA);
-    printf("[Setup] Attribute universe size ℓ: %d\n", n_attributes);
     
     mpk_init(mpk, n_attributes);
     msk_init(msk);
     
     SampleR_matrix_centered((signed_poly_matrix) msk->T, 2 * PARAM_D, PARAM_D * PARAM_K, PARAM_SIGMA);
     
-    printf("[Setup]   Computing Schur complements for trapdoor sampling...\n");
     construct_complex_private_key(msk->cplx_T, msk->sch_comp, msk->T);
 
     for (int i = 0; i < PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K; i++) {
@@ -38,7 +27,6 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     }
     matrix_crt_representation(msk->T, 2 * PARAM_D, PARAM_D * PARAM_K, LOG_R);
     
-    printf("[Setup]   Constructing public matrix A ∈ R^{k×m}_q...\n");
     scalar *A_hat_coeffs = malloc(PARAM_D * PARAM_D * PARAM_N * sizeof(scalar));
     scalar *AprimeT_coeffs = malloc(PARAM_D * PARAM_D * PARAM_K * PARAM_N * sizeof(scalar));
     poly_matrix A_hat = A_hat_coeffs;
@@ -75,14 +63,7 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
     
     
     
-    printf("[Setup]\n");
-    printf("[Setup] Algorithm 1, Line 2: β ← Uniform(Rq)\n");
-    printf("[Setup] Selecting random challenge element...\n");
     random_poly(mpk->beta, PARAM_N - 1);
-    printf("[Setup]   Challenge β generated\n");
-    printf("[Setup] Generating %d cacheable attribute sub-matrices...\n", n_attributes);
-    printf("[Setup]   B_plus layout: %d attributes × %d polynomials = %d total polys\n",
-           n_attributes, PARAM_M, n_attributes * PARAM_M);
     
     for (uint32_t i = 0; i < n_attributes; i++) {
         poly_matrix B_plus_i = &mpk->B_plus[i * PARAM_M * PARAM_N];
@@ -90,16 +71,7 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
         
         poly_matrix B_minus_i = &mpk->B_minus[i * PARAM_M * PARAM_N];
         random_poly(B_minus_i, PARAM_M * PARAM_N - 1);
-        
-        if (i == 0 || i == n_attributes - 1) {
-            printf("[Setup]     Attribute %d: B_plus offset=%lu, B_minus offset=%lu\n",
-                   i, (unsigned long)(i * PARAM_M * PARAM_N), 
-                   (unsigned long)(i * PARAM_M * PARAM_N));
-        }
     }
-    
-    printf("[Setup]   Generated %d attribute vector pairs (B+_i, B-_i)\n", n_attributes);
-    printf("[Setup]   Converting attribute vectors to CRT representation...\n");
     
     for (uint32_t i = 0; i < n_attributes; i++) {
         poly_matrix B_plus_i = &mpk->B_plus[i * PARAM_M * PARAM_N];
@@ -112,15 +84,8 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
             crt_representation(B_plus_ij, LOG_R);
             crt_representation(B_minus_ij, LOG_R);
         }
-        
-        if (i % 20 == 0) {
-            printf("[Setup]     Converted attributes 0-%d to CRT\n", i);
-        }
     }
     
-    printf("[Setup]   All %d attribute vectors converted to CRT\n", n_attributes);
-    
-    printf("[Setup]   Converting β to CRT representation...\n");
     crt_representation(mpk->beta, LOG_R);
     if (getenv("ARITH_DEBUG")) {
         for (int comp = 0; comp < LOG_R; comp++) {
@@ -129,14 +94,6 @@ int lcp_setup(uint32_t n_attributes, MasterPublicKey *mpk, MasterSecretKey *msk)
             dump_crt_component(mpk->beta, LOG_R, comp, tag);
         }
     }
-    
-    printf("[Setup] Master Public Key (MPK):\n");
-    printf("[Setup]   - Matrix A: k×m = %d×%d (module matrix)\n", PARAM_D, PARAM_M);
-    printf("[Setup]   - Attribute vectors: %d pairs (B+_i, B-_i)\n", n_attributes);
-    printf("[Setup]   - Challenge: β ∈ Rq\n");
-    printf("[Setup] Master Secret Key (MSK):\n");
-    printf("[Setup]   - Trapdoor TA: 2k×km = %d×%d\n", 2*PARAM_D, PARAM_D*PARAM_K);
-    printf("[Setup]   - Schur complements for Gaussian sampling\n");
     
     return 0;
 }
@@ -167,7 +124,6 @@ int lcp_save_mpk(const MasterPublicKey *mpk, const char *filename) {
     fwrite(mpk->beta, sizeof(scalar), PARAM_N, fp);
     
     fclose(fp);
-    printf("[Setup] MPK saved to %s\n", filename);
     return 0;
 }
 
@@ -196,7 +152,6 @@ int lcp_load_mpk(MasterPublicKey *mpk, const char *filename) {
     fread(mpk->beta, sizeof(scalar), PARAM_N, fp);
     
     fclose(fp);
-    printf("[Setup] MPK loaded from %s\n", filename);
     return 0;
 }
 
@@ -220,21 +175,17 @@ int lcp_save_msk(const MasterSecretKey *msk, const char *filename) {
     fwrite(msk->sch_comp, sizeof(cplx), sch_comp_size, fp);
     
     fclose(fp);
-    printf("[Setup] MSK saved to %s (keep secret!)\n", filename);
     return 0;
 }
 
 int lcp_load_msk(MasterSecretKey *msk, const char *filename) {
-    printf("[DEBUG] lcp_load_msk called with filename: %s\n", filename);
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
         fprintf(stderr, "Error: Cannot open file %s for reading\n", filename);
         return -1;
     }
-    printf("[DEBUG] File opened successfully\n");
     
     msk_init(msk);
-    printf("[DEBUG] msk_init completed\n");
     
     size_t t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
     size_t read_t = fread(msk->T, sizeof(scalar), t_size, fp);
@@ -264,6 +215,5 @@ int lcp_load_msk(MasterSecretKey *msk, const char *filename) {
     }
     
     fclose(fp);
-    printf("[Setup] MSK loaded from %s\n", filename);
     return 0;
 }

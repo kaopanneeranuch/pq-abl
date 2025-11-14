@@ -162,34 +162,15 @@ void sample_D(signed_scalar *z, real *c, real sigma)
 	real c_d_floor = floor(c_d);
 	real c_d_frac = c_d - c_d_floor;
 	
-	if (call_count % 32 == 0 || call_count <= 4) {
-		printf("[DEBUG] sample_D: Call #%llu, calling SampleZ(%f, %f) for z[%d]...\n", 
-		       call_count, c_d_frac, sigma / d_coeffs[PARAM_K - 1], PARAM_K - 1); fflush(stdout);
-	}
 	z[PARAM_K - 1] = c_d_floor + SampleZ(c_d_frac, sigma / d_coeffs[PARAM_K - 1]);
-	if (call_count % 32 == 0 || call_count <= 4) {
-		printf("[DEBUG] sample_D: Call #%llu, z[%d] = %d, now sampling remaining %d coefficients...\n", 
-		       call_count, PARAM_K - 1, z[PARAM_K - 1], PARAM_K - 1); fflush(stdout);
-	}
 	
 	for(int i = 0 ; i < PARAM_K - 1 ; ++i)
 		{
 		real c_i = z[PARAM_K - 1] * d_coeffs[i] - c[i];
 		real c_i_floor = floor(c_i);
 		real c_i_frac = c_i - c_i_floor;
-		if (call_count % 32 == 0 || (call_count <= 4 && i < 4)) {
-			printf("[DEBUG] sample_D: Call #%llu, coefficient %d/%d: calling SampleZ(%f, %f)...\n", 
-			       call_count, i+1, PARAM_K - 1, c_i_frac, sigma); fflush(stdout);
-		}
 		z[i] = c_i_floor + SampleZ(c_i_frac, sigma);
-		if (call_count % 32 == 0 || (call_count <= 4 && i < 4)) {
-			printf("[DEBUG] sample_D: Call #%llu, coefficient %d/%d: z[%d] = %d\n", 
-			       call_count, i+1, PARAM_K - 1, i, z[i]); fflush(stdout);
 		}
-		}
-	if (call_count % 32 == 0 || call_count <= 4) {
-		printf("[DEBUG] sample_D: Call #%llu completed\n", call_count); fflush(stdout);
-	}
 	}
 
 /*
@@ -200,22 +181,12 @@ void sample_G_perturb(real *p, real sigma)
 	static unsigned long long call_count = 0;
 	call_count++;
 	
-	if (call_count % 32 == 0 || call_count <= 4) {
-		printf("[DEBUG] sample_G_perturb: Call #%llu, starting (K=%d, will call SampleZ %d times)...\n", 
-		       call_count, PARAM_K, PARAM_K); fflush(stdout);
-	}
-	
 	// Validate l_coeffs is initialized
 	if (l_coeffs[0] == 0.0 || isnan(l_coeffs[0]) || isinf(l_coeffs[0])) {
 		fprintf(stderr, "[ERROR] sample_G_perturb: l_coeffs not initialized! l_coeffs[0]=%f\n", l_coeffs[0]);
 		fprintf(stderr, "[ERROR] Call init_D_lattice_coeffs() before using sampling functions!\n");
 		fflush(stderr);
 		abort();
-	}
-	
-	if (call_count <= 4) {
-		printf("[DEBUG] sample_G_perturb: Call #%llu, sigma=%f, l_coeffs[0]=%f, l_coeffs[%d]=%f\n", 
-		       call_count, sigma, l_coeffs[0], PARAM_K-1, l_coeffs[PARAM_K-1]); fflush(stdout);
 	}
 	
 	real beta = 0, z[PARAM_K+1];
@@ -240,16 +211,8 @@ void sample_G_perturb(real *p, real sigma)
 			abort();
 		}
 		
-		if (call_count % 32 == 0 || (call_count <= 4 && i < 4)) {
-			printf("[DEBUG] sample_G_perturb: Call #%llu, coefficient %d/%d: calling SampleZ(%f, %f)...\n", 
-			       call_count, i+1, PARAM_K, c_i_frac, sigma_i); fflush(stdout);
-		}
 		z[i] = c_i_floor + SampleZ(c_i_frac, sigma_i);
 		beta = -z[i] * h_coeffs[i];
-		if (call_count % 32 == 0 || (call_count <= 4 && i < 4)) {
-			printf("[DEBUG] sample_G_perturb: Call #%llu, coefficient %d/%d: z[%d] = %.0f\n", 
-			       call_count, i+1, PARAM_K, i, z[i]); fflush(stdout);
-		}
 		}
 	
 	p[0] = (2*PARAM_B+1)*z[0] + PARAM_B*z[1];
@@ -257,10 +220,6 @@ void sample_G_perturb(real *p, real sigma)
 		{
 		p[i] = PARAM_B * (z[i-1] + 2*z[i] + z[i+1]);
 		}
-	
-	if (call_count % 32 == 0 || call_count <= 4) {
-		printf("[DEBUG] sample_G_perturb: Call #%llu completed\n", call_count); fflush(stdout);
-	}
 	}
 
 /*
@@ -272,22 +231,11 @@ void scalar_sample_G(signed_scalar *t, scalar u)
 	static unsigned long long total_sampleZ_calls = 0;
 	
 	call_count++;
-	if (call_count % 256 == 0) {
-		printf("[DEBUG] scalar_sample_G: Called %llu times so far (this is call #%llu)\n", 
-		       call_count, call_count); fflush(stdout);
-	}
 	
 	real sigma = PARAM_ALPHA / (PARAM_B + 1), c[PARAM_K], p[PARAM_K];
 	signed_scalar z[PARAM_K];
 	
-	if (call_count % 256 == 0) {
-		printf("[DEBUG] scalar_sample_G: Calling sample_G_perturb (K=%d, calls SampleZ %d times)...\n", 
-		       PARAM_K, PARAM_K); fflush(stdout);
-	}
 	sample_G_perturb(p, sigma);
-	if (call_count % 256 == 0) {
-		printf("[DEBUG] scalar_sample_G: sample_G_perturb completed\n"); fflush(stdout);
-	}
 	
 	c[0] = ((real) get_bit_b(u,0) - p[0]) / PARAM_B;
 	for(int i = 1 ; i < PARAM_K ; ++i)
@@ -295,14 +243,7 @@ void scalar_sample_G(signed_scalar *t, scalar u)
 		c[i] = (c[i-1] + get_bit_b(u,i) - p[i]) / PARAM_B;
 		}
 	
-	if (call_count % 256 == 0) {
-		printf("[DEBUG] scalar_sample_G: Calling sample_D (K=%d, calls SampleZ %d times)...\n", 
-		       PARAM_K, PARAM_K); fflush(stdout);
-	}
 	sample_D(z, c, sigma);
-	if (call_count % 256 == 0) {
-		printf("[DEBUG] scalar_sample_G: sample_D completed\n"); fflush(stdout);
-	}
 	
 	t[0] = PARAM_B*z[0] + Q_BIT(0)*z[PARAM_K - 1] + get_bit_b(u,0);
 	for(int i = 1 ; i < PARAM_K - 1 ; ++i)
@@ -310,10 +251,6 @@ void scalar_sample_G(signed_scalar *t, scalar u)
 		t[i] = PARAM_B*z[i] - z[i-1] + Q_BIT(i)*z[PARAM_K - 1] + get_bit_b(u,i);
 		}
 	t[PARAM_K - 1] = Q_BIT(PARAM_K - 1)*z[PARAM_K - 1] - z[PARAM_K - 2] + get_bit_b(u,PARAM_K-1);
-	
-	if (call_count % 256 == 0) {
-		printf("[DEBUG] scalar_sample_G: Completed call #%llu\n", call_count); fflush(stdout);
-	}
 	}
 
 /*
@@ -324,26 +261,15 @@ void ring_sample_G(signed_poly_matrix t, poly u)
 	signed_scalar t_T[PARAM_N * PARAM_K];
 	
 	// sample n times from the scalar G-lattice
-	printf("[DEBUG] ring_sample_G: Starting (N=%d coefficients, K=%d, each calls scalar_sample_G)...\n", 
-	       PARAM_N, PARAM_K); fflush(stdout);
 	for(int i = 0 ; i < PARAM_N ; ++i)
 		{
-		// Print progress every 32 coefficients (256/32 = 8 progress updates per component)
-		if (i % 32 == 0 || i < 4 || i == PARAM_N - 1) {
-			printf("[DEBUG] ring_sample_G: Sampling coefficient %d/%d (scalar_sample_G)...\n", i+1, PARAM_N); fflush(stdout);
-		}
 		signed_poly t_i = &t_T[i*PARAM_K];
 		scalar_sample_G(t_i, u[i]);
-		if (i % 32 == 0 || i < 4 || i == PARAM_N - 1) {
-			printf("[DEBUG] ring_sample_G: Coefficient %d/%d completed\n", i+1, PARAM_N); fflush(stdout);
 		}
-		}
-	printf("[DEBUG] ring_sample_G: All %d coefficients sampled, transposing matrix...\n", PARAM_N); fflush(stdout);
 	
 	// permute the coefficients of t
 	// as if t was a (n, k) matrix of scalars and we transposed it
 	transpose_scalar_matrix((scalar *) t, (scalar *) t_T, PARAM_N, PARAM_K);
-	printf("[DEBUG] ring_sample_G: Transposition completed\n"); fflush(stdout);
 	}
 
 /*
@@ -398,19 +324,13 @@ void transpose_signed_scalar_matrix2(signed_scalar *A_T, scalar *A, int l0, int 
 void module_sample_G(signed_poly_matrix t, poly_matrix u)
 	{
 	// sample d times from the ring G-lattice
-	printf("[DEBUG] module_sample_G: Starting (D=%d components, each samples %d coefficients from G-lattice)...\n", 
-	       PARAM_D, PARAM_N); fflush(stdout);
 	for(int i = 0 ; i < PARAM_D ; ++i)
 		{
-		printf("[DEBUG] module_sample_G: Processing component %d/%d (ring_sample_G, samples %d coefficients)...\n", 
-		       i+1, PARAM_D, PARAM_N); fflush(stdout);
 		signed_poly_matrix t_i = poly_matrix_element(t, PARAM_D, 0, i*PARAM_K);
 		poly u_i = poly_matrix_element(u, 1, i, 0);
 		
 		ring_sample_G(t_i, u_i);
-		printf("[DEBUG] module_sample_G: Component %d/%d completed\n", i+1, PARAM_D); fflush(stdout);
 		}
-	printf("[DEBUG] module_sample_G: All %d components completed\n", PARAM_D); fflush(stdout);
 	}
 
 /*
@@ -510,25 +430,19 @@ void sample_fz(signed_scalar *p, cplx_poly cplx_p, cplx_poly f, cplx *c, int dep
 */
 void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix sch_comp)
 	{
-	printf("[DEBUG] sample_perturb: START\n"); fflush(stdout);
-	
 	// Validate sch_comp contains reasonable values
-	printf("[DEBUG] sample_perturb: Validating sch_comp...\n"); fflush(stdout);
 	int bad_count = 0;
 	for(int i = 0; i < PARAM_N * PARAM_D * (2 * PARAM_D + 1); ++i) {
 		if (isnan(creal(sch_comp[i])) || isnan(cimag(sch_comp[i])) || 
 		    isinf(creal(sch_comp[i])) || isinf(cimag(sch_comp[i]))) {
 			bad_count++;
 			if (bad_count < 5) {
-				printf("[ERROR] sch_comp[%d] = %f + %fi (NaN or Inf!)\n", i, creal(sch_comp[i]), cimag(sch_comp[i]));
+				fprintf(stderr, "[ERROR] sch_comp[%d] = %f + %fi (NaN or Inf!)\n", i, creal(sch_comp[i]), cimag(sch_comp[i]));
 			}
 		}
 	}
 	if (bad_count > 0) {
-		printf("[ERROR] Found %d invalid values in sch_comp! This will cause infinite loops.\n", bad_count);
-	} else {
-		printf("[DEBUG] sch_comp validation passed (first few values: [0]=%f+%fi, [1]=%f+%fi)\n", 
-		       creal(sch_comp[0]), cimag(sch_comp[0]), creal(sch_comp[1]), cimag(sch_comp[1]));
+		fprintf(stderr, "[ERROR] Found %d invalid values in sch_comp! This will cause infinite loops.\n", bad_count);
 	}
 	
 	//cplx T_coeffs[PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K], sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
@@ -540,13 +454,11 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	// First sample dk independant centred polynomials with covariance (zeta^2 - alpha^2)
 	signed_poly_matrix p_2d = poly_matrix_element(p, 1, 2 * PARAM_D, 0);
 	
-	printf("[DEBUG] sample_perturb: Sampling %d coefficients with param=%f\n", PARAM_N * PARAM_D * PARAM_K, sqrt((PARAM_ZETA * PARAM_ZETA) - (PARAM_ALPHA * PARAM_ALPHA))); fflush(stdout);
 	real param = sqrt((PARAM_ZETA * PARAM_ZETA) - (PARAM_ALPHA * PARAM_ALPHA));
 	for(int i = 0 ; i < PARAM_N * PARAM_D * PARAM_K ; ++i)
 		{
 		p_2d[i] = SampleZ(0, param); // add q so that the coefficients are positive
 		}
-	printf("[DEBUG] sample_perturb: Initial sampling done\n"); fflush(stdout);
 
 	
 
@@ -560,21 +472,13 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 
 	
 	matrix_cplx_crt_representation(cplx_p, PARAM_D * PARAM_K, 1);
-
-	printf("[DEBUG] sample_perturb: CRT transform done, constructing first center\n"); fflush(stdout);
-	
 	
 	// Construct the new center (depends on the dk polynomials sampled before)
 	construct_first_center(c, T, cplx_p);
-
-	printf("[DEBUG] sample_perturb: First center constructed, starting iterative sampling for %d polynomials\n", 2 * PARAM_D - 2); fflush(stdout);
-
 	
 	// Sample 2d - 2 polynomials iteratively
 	for(int i = 2 * PARAM_D - 1 ; i > 1 ; --i)
 		{
-		printf("[DEBUG] sample_perturb: Iteration i=%d, calling sample_fz\n", i); fflush(stdout);
-		
 		// Sample p[i] with covariance sch_comp[i,i] and center c[i]
 		// (copying sch_comp[i,i] and c[i] since they're going to be modified)
 		signed_scalar *p_i = poly_matrix_element(p, 1, i, 0);
@@ -587,13 +491,10 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 		memcpy(center, c_i, PARAM_N * sizeof(cplx));
 		sample_fz(p_i, cplx_p, covariance, center, 0);
 		
-		printf("[DEBUG] sample_perturb: Iteration i=%d, sample_fz done\n", i); fflush(stdout);
-		
 		// Update the center
 		construct_new_center(c, sch_comp, cplx_p, i);
 		}
 	
-	printf("[DEBUG] sample_perturb: Iterative sampling done, calling sample_2z for last 2 polynomials\n"); fflush(stdout);
 	// Sample the last 2 polynomials with the specialized sample_2z algorithm (do not forget to copy the covariance first)
 	cplx sch_comp_copy_coeffs[PARAM_N * 3];
 	cplx_poly_matrix sch_comp_copy = sch_comp_copy_coeffs;
@@ -606,7 +507,6 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	cplx_poly sch_comp_11 = triangular_poly_matrix_element(sch_comp_copy, 1, 1);
 	
 	sample_2z((signed_scalar *) p, cplx_p, sch_comp_00, sch_comp_01, sch_comp_11, c, 0);
-	printf("[DEBUG] sample_perturb: DONE!\n"); fflush(stdout);
 	}
 
 /*
@@ -726,27 +626,19 @@ void sample_pre(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix 
 
 void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix cplx_T, cplx_poly_matrix sch_comp, poly h_inv, poly_matrix u)
 	{
-	printf("[DEBUG] sample_pre_target: START\n"); fflush(stdout);
-	
 	// Sample a perturbation p in R^m
 	signed_scalar p_coeffs[PARAM_N * PARAM_M];
 	signed_poly_matrix p = p_coeffs;
 	
-	printf("[DEBUG] sample_pre_target: Calling sample_perturb...\n"); fflush(stdout);
 	sample_perturb(p, cplx_T, sch_comp);
-	printf("[DEBUG] sample_pre_target: sample_perturb done\n"); fflush(stdout);
-	
 	
 	// Add q to p's coeffs so that they are positive, and put p in the CRT domain
-	printf("[DEBUG] sample_pre_target: Adding q to p coeffs...\n"); fflush(stdout);
 	for(int i = 0 ; i < PARAM_N * PARAM_M ; ++i)
 		{
 		p[i] += PARAM_Q;
 		}
 	
-	printf("[DEBUG] sample_pre_target: Converting p to CRT...\n"); fflush(stdout);
 	matrix_crt_representation((poly_matrix) p, PARAM_M, 1, LOG_R);
-	printf("[DEBUG] sample_pre_target: p in CRT domain\n"); fflush(stdout);
 
 	/* Adjust p's first d polynomials so that A * p == u (make p a particular solution)
 	 * This is necessary because TI spans the kernel of A: adding TI*z will not
@@ -756,47 +648,35 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	 * Without this, A * x = A * p ≠ u, breaking the trapdoor relationship.
 	 */
 	// compute tmp = A * p (we'll reuse this result later to avoid recomputing A * p)
-	printf("[DEBUG] sample_pre_target: Computing A * p (this may take a while)...\n"); fflush(stdout);
 	poly_matrix tmp = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
 	poly_matrix deltas = NULL;  // Store deltas for reuse
 	if (tmp) {
-		printf("[DEBUG] sample_pre_target: Calling multiply_by_A (D=%d, M=%d, N=%d)...\n", PARAM_D, PARAM_M, PARAM_N); fflush(stdout);
 		multiply_by_A(tmp, A_m, (poly_matrix) p);
-		printf("[DEBUG] sample_pre_target: multiply_by_A completed\n"); fflush(stdout);
 		
 		// Allocate storage for deltas (we'll reuse this to compute A * p_new efficiently)
 		deltas = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
 		
 		// delta = u - tmp (for all D components)
-		printf("[DEBUG] sample_pre_target: Adjusting p components (D=%d)...\n", PARAM_D); fflush(stdout);
 		for (int comp = 0; comp < PARAM_D; comp++) {
-			printf("[DEBUG] sample_pre_target: Adjusting component %d/%d...\n", comp+1, PARAM_D); fflush(stdout);
 			poly tmp_comp = poly_matrix_element(tmp, 1, comp, 0);
 			poly u_comp = poly_matrix_element(u, PARAM_D, comp, 0);
 			poly delta = poly_matrix_element(deltas, 1, comp, 0);
 			
 			// delta = u_comp - tmp_comp
-			printf("[DEBUG] sample_pre_target:   Component %d: Computing delta (u - tmp)...\n", comp+1); fflush(stdout);
 			memcpy(delta, u_comp, PARAM_N * sizeof(scalar));
 			sub_poly(delta, delta, tmp_comp, PARAM_N - 1);
 			freeze_poly(delta, PARAM_N - 1);
 			
 			// Since A = [I_d | Ā], we can adjust p[comp] directly to fix the first D components
 			// For component comp, p[comp] contributes directly to A*p[comp] via the identity part
-			printf("[DEBUG] sample_pre_target:   Component %d: Adjusting p[%d]...\n", comp+1, comp); fflush(stdout);
 			poly_matrix p_as_poly = (poly_matrix) p;
 			poly p_comp = poly_matrix_element(p_as_poly, 1, comp, 0);
 			add_poly(p_comp, p_comp, delta, PARAM_N - 1);
 			freeze_poly(p_comp, PARAM_N - 1);
-			
-			printf("[DEBUG] sample_pre_target:   Component %d: Adjustment completed\n", comp+1); fflush(stdout);
 		}
-		printf("[DEBUG] sample_pre_target: All components adjusted\n"); fflush(stdout);
-		printf("[DEBUG] sample_pre_target: Keeping tmp and deltas for reuse (will free after v computation)\n"); fflush(stdout);
 		// DON'T free tmp here - we'll reuse it!
-		printf("[DEBUG] sample_pre_target: p adjustment completed\n"); fflush(stdout);
 	} else {
-		fprintf(stderr, "[DEBUG] sample_pre_target: ERROR: Failed to allocate tmp\n"); fflush(stderr);
+		fprintf(stderr, "[ERROR] sample_pre_target: Failed to allocate tmp\n");
 	}
 
 	/* Diagnostic: compute A * p (CRT) to see whether p already maps to the
@@ -818,26 +698,19 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 		}
 	}
 	
-	printf("[DEBUG] sample_pre_target: Starting v computation (v <- - h_inv * A_m * p)...\n"); fflush(stdout);
 	// v <- - h_inv * A_m * p (in the CRT domain)
 	double_scalar prod_coeffs[2*PARAM_N];
 	poly_matrix v = x; // store v at the beginning of x
 	double_poly prod = prod_coeffs;
 
-	/* Debug expected v pointer (set via sampler_debug_set_expected_v) */
-	static scalar *debug_expected_v = NULL;
-	static int debug_expected_v_set = 0;
-
 	// OPTIMIZATION: Reuse the first A * p result instead of recomputing
 	// Since A = [I_d | Ā] and we only adjusted the first D components of p,
 	// we can compute: A * p_new = tmp + deltas (component-wise for first D components)
-	printf("[DEBUG] sample_pre_target: Computing v = A * p_new (OPTIMIZED: reusing first A * p result)...\n"); fflush(stdout);
 	
 	if (tmp && deltas) {
 		// OPTIMIZATION: v = tmp + deltas (component-wise)
 		// Since we adjusted p[comp] by delta[comp] for comp < D, and A = [I_d | Ā],
 		// we have: (A * p_new)[comp] = tmp[comp] + delta[comp] = u[comp] for comp < D
-		printf("[DEBUG] sample_pre_target: Reusing tmp and deltas to compute v without full matrix multiplication\n"); fflush(stdout);
 		
 		// Copy tmp to v first (this is A * p_old)
 		memcpy(v, tmp, PARAM_D * PARAM_N * sizeof(scalar));
@@ -858,53 +731,37 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 		// Free tmp and deltas now that we've used them
 		free(tmp);
 		free(deltas);
-		printf("[DEBUG] sample_pre_target: v computed from reused tmp + deltas (OPTIMIZATION: saved one multiply_by_A call!)\n"); fflush(stdout);
 	} else {
 		// Fallback: compute A * p_new the slow way if we don't have tmp/deltas
-		printf("[DEBUG] sample_pre_target: WARNING: tmp/deltas not available, falling back to full multiply_by_A\n"); fflush(stdout);
-		printf("[DEBUG] sample_pre_target: Allocating zero matrix...\n"); fflush(stdout);
 		scalar *zero_coeffs = malloc(PARAM_N * PARAM_D * sizeof(scalar));
 		if (!zero_coeffs) {
-			fprintf(stderr, "[DEBUG] sample_pre_target: ERROR: Failed to allocate zero_coeffs\n"); fflush(stderr);
+			fprintf(stderr, "[ERROR] sample_pre_target: Failed to allocate zero_coeffs\n");
 			if (tmp) free(tmp);
 			if (deltas) free(deltas);
 			return;
 		}
 		poly_matrix zero = zero_coeffs;
 		zero_poly(zero, PARAM_N * PARAM_D - 1);
-		printf("[DEBUG] sample_pre_target: Zero matrix allocated and initialized\n"); fflush(stdout);
 
-		printf("[DEBUG] sample_pre_target: Calling multiply_by_A for v computation (this may take a while)...\n"); fflush(stdout);
 		multiply_by_A(v, A_m, (poly_matrix) p);
-		printf("[DEBUG] sample_pre_target: multiply_by_A for v completed\n"); fflush(stdout);
 		free(zero_coeffs);
 	}
 
-	printf("[DEBUG] sample_pre_target: Computing h_inv * v for each component (D=%d components)...\n", PARAM_D); fflush(stdout);
 	if (getenv("ARITH_DEBUG")) {
 		/* Dump v (first poly) and target u (first poly) in CRT for comparison */
-		printf("[DEBUG] sample_pre_target: ARITH_DEBUG enabled, dumping v and u...\n"); fflush(stdout);
 		poly v0 = poly_matrix_element(v, 1, 0, 0);
 		poly u0 = poly_matrix_element(u, PARAM_D, 0, 0);
-		printf("[DEBUG] sample_pre_target: Dumping %d CRT components for v and u...\n", (1 << LOG_R)); fflush(stdout);
 		for (int comp = 0; comp < LOG_R; ++comp) {
 			char tagv[80]; char tagu[80];
 			snprintf(tagv, sizeof(tagv), "SAMPLE_v_after_A_comp_%d", comp);
 			snprintf(tagu, sizeof(tagu), "SAMPLE_u_comp_%d", comp);
-			if (comp < 2 || comp == LOG_R - 1) {
-				printf("[DEBUG] sample_pre_target: Dumping CRT component %d/%d...\n", comp+1, LOG_R); fflush(stdout);
-			}
 			dump_crt_component(v0, LOG_R, comp, tagv);
 			dump_crt_component(u0, LOG_R, comp, tagu);
 		}
-		printf("[DEBUG] sample_pre_target: Diagnostic dump of v and u completed\n"); fflush(stdout);
 	}
 
 	/* Compute v <- v - u directly in-place (both are in CRT domain). */
-	printf("[DEBUG] sample_pre_target: Computing v - u (subtracting %d polynomials, %d coefficients each)...\n", 
-	       PARAM_D, PARAM_N); fflush(stdout);
 	sub_poly(v, v, u, PARAM_N * PARAM_D - 1);
-	printf("[DEBUG] sample_pre_target: v - u completed\n"); fflush(stdout);
 
 	/* If KeyGen provided an expected A·omega_A, compare it to our v (CRT)
 	 * before any h_inv / canonicalization. This will fail-fast with a
@@ -953,64 +810,42 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
     
 	for(int i = 0 ; i < PARAM_D ; ++i)
 		{
-		printf("[DEBUG] sample_pre_target: Processing component %d/%d (h_inv * v)...\n", i+1, PARAM_D); fflush(stdout);
 		poly v_i = poly_matrix_element(v, 1, i, 0);
 
 		if (getenv("ARITH_DEBUG")) {
-			printf("[DEBUG] sample_pre_target: Dumping v before h_inv (component %d)...\n", i); fflush(stdout);
 			char tagb[80];
 			snprintf(tagb, sizeof(tagb), "SAMPLE_v_before_hinv_comp_%d", i);
 			for (int comp = 0; comp < LOG_R; ++comp) {
 				dump_crt_component(v_i, LOG_R, comp, tagb);
 			}
-			printf("[DEBUG] sample_pre_target: Dump completed for component %d\n", i); fflush(stdout);
 		}
         
-		printf("[DEBUG] sample_pre_target: Calling mul_crt_poly for component %d (depth=%d, %d components, this may take a while)...\n", 
-		       i, LOG_R, (1 << LOG_R)); fflush(stdout);
 		mul_crt_poly(prod, h_inv, v_i, LOG_R);
-		printf("[DEBUG] sample_pre_target: mul_crt_poly completed for component %d\n", i); fflush(stdout);
-		
-		printf("[DEBUG] sample_pre_target: Calling reduce_double_crt_poly for component %d (depth=%d, %d components)...\n", 
-		       i, LOG_R, (1 << LOG_R)); fflush(stdout);
 		reduce_double_crt_poly(v_i, prod, LOG_R);
-		printf("[DEBUG] sample_pre_target: reduce_double_crt_poly completed for component %d\n", i); fflush(stdout);
 		
-		printf("[DEBUG] sample_pre_target: Negating %d coefficients for component %d...\n", PARAM_N, i); fflush(stdout);
 		for (int j = 0; j < PARAM_N; ++j) {
 			/* Keep the same canonicalization as the non-target path:
 			 * reduce_double_crt_poly produced values in [0,q-1], so subtract
 			 * from q to get the correct representative. */
 			v_i[j] = PARAM_Q - v_i[j];
 		}
-		printf("[DEBUG] sample_pre_target: Negation completed for component %d\n", i); fflush(stdout);
 
 		if (getenv("ARITH_DEBUG")) {
-			printf("[DEBUG] sample_pre_target: Dumping v after h_inv (component %d)...\n", i); fflush(stdout);
 			char taga[80];
 			snprintf(taga, sizeof(taga), "SAMPLE_v_after_hinv_comp_%d", i);
 			for (int comp = 0; comp < LOG_R; ++comp) {
 				dump_crt_component(v_i, LOG_R, comp, taga);
 			}
-			printf("[DEBUG] sample_pre_target: Dump completed for component %d\n", i); fflush(stdout);
 		}
-		printf("[DEBUG] sample_pre_target: Component %d/%d completed\n", i+1, PARAM_D); fflush(stdout);
 		}
-
-	printf("[DEBUG] sample_pre_target: All %d components of h_inv * v completed\n", PARAM_D); fflush(stdout);
 	
 	// Put v back into the normal domain
-	printf("[DEBUG] sample_pre_target: Converting v from CRT to coefficient domain (%d polynomials)...\n", PARAM_D); fflush(stdout);
 	matrix_coeffs_representation(v, PARAM_D, 1, LOG_R);
-	printf("[DEBUG] sample_pre_target: v converted to coefficient domain\n"); fflush(stdout);
-	
 	
 	// Sample z from the G-lattice with target v
-	printf("[DEBUG] sample_pre_target: Sampling z from G-lattice with target v (this may take a while)...\n"); fflush(stdout);
 	signed_poly_matrix z = (signed_poly_matrix) poly_matrix_element(x, 1, 2 * PARAM_D, 0); // store z at the end of x to get TI * z for cheaper
 	
 	module_sample_G(z, v);
-	printf("[DEBUG] sample_pre_target: module_sample_G completed\n"); fflush(stdout);
 
 	
 	// Make sure z has positive coefficients and put it in the CRT domain

@@ -96,6 +96,9 @@ target_link_libraries(test_keygen lcp_abe)
 add_executable(test_encrypt lcp-abe/test/encrypt.c)
 target_link_libraries(test_encrypt lcp_abe)
 
+add_executable(test_encrypt_all lcp-abe/test/encrypt_all.c)
+target_link_libraries(test_encrypt_all lcp_abe)
+
 # In-memory round-trip test
 add_executable(test_roundtrip lcp-abe/test/test_roundtrip.c)
 target_include_directories(test_roundtrip PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
@@ -109,24 +112,28 @@ endif()
 add_executable(test_decrypt lcp-abe/test/decrypt.c)
 target_link_libraries(test_decrypt lcp_abe)
 
+add_executable(test_decrypt_all lcp-abe/test/decrypt_all.c)
+target_link_libraries(test_decrypt_all lcp_abe)
+
 # Removed test_verify_keygen - file doesn't exist
 # add_executable(test_verify_keygen lcp-abe/test/verify_keygen.c)
 # target_link_libraries(test_verify_keygen lcp_abe)
 
-# Linearity diagnostic: test coeffs_representation linearity
-add_executable(coeffs_linearity lcp-abe/test/coeffs_linearity.c)
-target_link_libraries(coeffs_linearity lcp_abe)
+# Removed coeffs_linearity - file was deleted
+# add_executable(coeffs_linearity lcp-abe/test/coeffs_linearity.c)
+# target_link_libraries(coeffs_linearity lcp_abe)
 
-add_executable(coeffs_failing_case lcp-abe/test/coeffs_failing_case.c)
-target_link_libraries(coeffs_failing_case lcp_abe)
+# Removed coeffs_failing_case - file was deleted
+# add_executable(coeffs_failing_case lcp-abe/test/coeffs_failing_case.c)
+# target_link_libraries(coeffs_failing_case lcp_abe)
 
-# Diagnostic test - minimal output
-add_executable(test_diagnostic test_diagnostic.c)
-target_include_directories(test_diagnostic PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
-target_link_libraries(test_diagnostic PRIVATE lcp_abe module_bfrs)
-if(NOT MSVC)
-    target_link_libraries(test_diagnostic PRIVATE m)
-endif()
+# Removed test_diagnostic - file was deleted
+# add_executable(test_diagnostic test_diagnostic.c)
+# target_include_directories(test_diagnostic PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
+# target_link_libraries(test_diagnostic PRIVATE lcp_abe module_bfrs)
+# if(NOT MSVC)
+#     target_link_libraries(test_diagnostic PRIVATE m)
+# endif()
 
 # Utility to view CT_obj files
 add_executable(view_ctobj lcp-abe/util/view_ctobj.c)
@@ -140,13 +147,3 @@ install(TARGETS lcp_abe module_bfrs
 install(DIRECTORY lcp-abe/
         DESTINATION include/lcp-abe
         FILES_MATCHING PATTERN "*.h")
-
-# Print configuration
-message(STATUS "========================================")
-message(STATUS "PQ-ABL Configuration")
-message(STATUS "========================================")
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "C Compiler: ${CMAKE_C_COMPILER}")
-message(STATUS "C Flags: ${CMAKE_C_FLAGS}")
-message(STATUS "Use OpenSSL: ${USE_OPENSSL}")
-message(STATUS "========================================")

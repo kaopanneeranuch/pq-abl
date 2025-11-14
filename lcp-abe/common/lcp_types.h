@@ -81,8 +81,13 @@ typedef struct {
     char action_type[32];
     char resource_id[64];
     char resource_type[32];
+    char resource_owner[64];
     char service_name[32];
     char region[32];
+    char instance_id[64];
+    char ip_address[32];
+    char application[64];
+    char event_description[256];
 } LogMetadata;
 
 typedef struct {

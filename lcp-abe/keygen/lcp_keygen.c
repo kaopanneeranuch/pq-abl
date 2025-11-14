@@ -9,17 +9,11 @@
 int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
                const AttributeSet *attr_set, UserSecretKey *usk) {
     
-    printf("[KeyGen] User attribute set Y: %d attributes\n", attr_set->count);
-    
     usk_init(usk, attr_set->count);
     usk->attr_set = *attr_set;
-
-    printf("[KeyGen] Sampling %d secret vectors ωi (m=%d dimensions each)...\n", 
-           attr_set->count, PARAM_M);
     
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
-        printf("[KeyGen]   Attribute %d/%d: %s\n", i+1, attr_set->count, attr->name);
         
         SampleR_matrix_centered((signed_poly_matrix) usk->omega_i[i], PARAM_M, 1, PARAM_SIGMA);
         
@@ -29,23 +23,11 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         matrix_crt_representation(usk->omega_i[i], PARAM_M, 1, LOG_R);
     }
     
-    printf("[KeyGen] Sampled %d vectors {ωi}\n", attr_set->count);
-    printf("[KeyGen]\n");
-    
     poly_matrix target = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     poly_matrix sum_term = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     
-    printf("[KeyGen]   Memory allocated: target=%p, sum_term=%p\n", (void*)target, (void*)sum_term);
-    
-    printf("[KeyGen]   Computing Σ(B+_i · ωi)...\n");
-    printf("[KeyGen]   MPK has %d attributes, PARAM_M=%d, PARAM_N=%d\n", 
-           mpk->n_attributes, PARAM_M, PARAM_N);
-    
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
-        
-        printf("[KeyGen]     Processing attribute %d/%d (index %d): %s\n", 
-               i+1, attr_set->count, attr->index, attr->name);
         
         if (attr->index >= mpk->n_attributes) {
             fprintf(stderr, "[KeyGen] ERROR: Invalid attribute index %d (max %d)\n", 
@@ -55,11 +37,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             return -1;
         }
         
-        printf("[KeyGen]       Accessing B_plus[%d] = offset %d scalars\n", 
-               attr->index, attr->index * PARAM_M * PARAM_N);
-        
         poly_matrix B_plus_i = &mpk->B_plus[attr->index * PARAM_M * PARAM_N];
-        printf("[KeyGen]       B_plus_i address: %p\n", (void*)B_plus_i);
         
         poly temp_result = (poly)calloc(PARAM_N, sizeof(scalar));
         if (!temp_result) {
@@ -68,8 +46,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             free(sum_term);
             return -1;
         }
-        
-        printf("[KeyGen]       Computing dot product over %d polynomials\n", PARAM_M);
         
         double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
         poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
@@ -84,63 +60,27 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
             return -1;
         }
         
-        printf("[KeyGen]       Allocated buffers: temp_prod=%p (size=%zu), reduced=%p (size=%zu)\n",
-               (void*)temp_prod, 2 * PARAM_N * sizeof(double_scalar),
-               (void*)reduced, PARAM_N * sizeof(scalar));
-        
         for (uint32_t j = 0; j < PARAM_M; j++) {
             poly B_ij = &B_plus_i[j * PARAM_N];
             
             poly omega_ij = &usk->omega_i[i][j * PARAM_N];
             
-            if (j < 3 || j == PARAM_M - 1) {
-                printf("[KeyGen]         [j=%d] B_ij=%p, omega_ij=%p\n", 
-                       j, (void*)B_ij, (void*)omega_ij);
-            }
-            
             memset(temp_prod, 0, 2 * PARAM_N * sizeof(double_scalar));
             memset(reduced, 0, PARAM_N * sizeof(scalar));
             
-            if (j < 2) {
-                printf("[KeyGen]         [j=%d] Calling mul_crt_poly...\n", j);
-            }
-            
             mul_crt_poly(temp_prod, B_ij, omega_ij, LOG_R);
-            
-            if (j < 2) {
-                printf("[KeyGen]         [j=%d] mul_crt_poly completed, temp_prod[0]=%lu\n", 
-                       j, (unsigned long)temp_prod[0]);
-                printf("[KeyGen]         [j=%d] Reducing double_poly to poly...\n", j);
-            }
-            
             reduce_double_crt_poly(reduced, temp_prod, LOG_R);
-            
-            if (j < 2) {
-                printf("[KeyGen]         [j=%d] Reduced, reduced[0]=%u\n", j, reduced[0]);
-            }
-            
             add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
             freeze_poly(temp_result, PARAM_N - 1);  
-            
-            if (j < 2) {
-                printf("[KeyGen]         [j=%d] Added to accumulator, temp_result[0]=%u\n", 
-                       j, temp_result[0]);
-            }
         }
         
         free(temp_prod);
         free(reduced);
         
-        printf("[KeyGen]       Dot product complete, freed buffers\n");
-        
-        printf("[KeyGen]       Dot product complete, adding to sum_term\n");
-        
         poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
         add_poly(sum_0, sum_0, temp_result, PARAM_N - 1);
         freeze_poly(sum_0, PARAM_N - 1);  
         free(temp_result);
-        
-        printf("[KeyGen]     Attribute %d processed successfully\n", i+1);
     }
     
     
@@ -150,15 +90,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     memcpy(target_0, mpk->beta, PARAM_N * sizeof(scalar));
     sub_poly(target_0, target_0, sum_0, PARAM_N - 1);
     freeze_poly(target_0, PARAM_N - 1);
-    
-    printf("[KeyGen]   Target = β - Σ(B+_i · ω_i)[0] \n");
-    printf("[KeyGen]   DEBUG: beta (first 4): %u %u %u %u\n",
-           mpk->beta[0], mpk->beta[1], mpk->beta[2], mpk->beta[3]);
-    printf("[KeyGen]   DEBUG: sum_term (first 4): %u %u %u %u\n",
-           sum_0[0], sum_0[1], sum_0[2], sum_0[3]);
-    printf("[KeyGen]   DEBUG: target = beta - sum_term (first 4): %u %u %u %u\n",
-           target_0[0], target_0[1], target_0[2], target_0[3]);
-    
 
     poly h_inv = (poly)calloc(PARAM_N, sizeof(scalar));
     h_inv[0] = 1;  // Identity
@@ -179,8 +110,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         for (int k = 0; k < 8 && k < PARAM_N; ++k) fprintf(stderr, " %u", usk->omega_A[k]);
         fprintf(stderr, "\n"); fflush(stderr);
     }
-    
-    printf("\n[KeyGen] DIAGNOSTIC: Verifying trapdoor relationship\n");
     
     poly_matrix A_omega_A = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     if (A_omega_A) {
@@ -234,34 +163,15 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
                         coeffs_representation(lhs_coeff, LOG_R);
                         coeffs_representation(beta_coeff, LOG_R);
                         
-                        printf("[KeyGen]   (A·ω_A)[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-                               A_omega_A_0[0], A_omega_A_0[1], A_omega_A_0[2], A_omega_A_0[3]);
-                        printf("[KeyGen]   Σ(B+_i · ω_i)[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-                               sum_B_omega_0[0], sum_B_omega_0[1], sum_B_omega_0[2], sum_B_omega_0[3]);
-                        printf("[KeyGen]   (A·ω_A)[0] + Σ(B+_i · ω_i)[0] (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-                               lhs_coeff[0], lhs_coeff[1], lhs_coeff[2], lhs_coeff[3]);
-                        printf("[KeyGen]   β (COEFF, first 4): [0]=%u, [1]=%u, [2]=%u, [3]=%u\n",
-                               beta_coeff[0], beta_coeff[1], beta_coeff[2], beta_coeff[3]);
-                        
                         int mismatch_count = 0;
                         for (int k = 0; k < PARAM_N && k < 16; k++) {
                             uint32_t diff = (lhs_coeff[k] > beta_coeff[k]) ? 
                                            (lhs_coeff[k] - beta_coeff[k]) : 
                                            (beta_coeff[k] - lhs_coeff[k]);  
                             if (diff > 1000 && diff < (PARAM_Q - 1000)) {
-                                if (mismatch_count < 5) {
-                                    printf("[KeyGen]   MISMATCH at coeff[%d]: lhs=%u, beta=%u, diff=%u\n",
-                                           k, lhs_coeff[k], beta_coeff[k], diff);
-                                }
                                 mismatch_count++;
                             }
                         }
-                        if (mismatch_count == 0) {
-                            printf("[KeyGen]   ✓ Trapdoor relationship VERIFIED (first 16 coeffs match within noise)\n");
-                        } else {
-                            printf("[KeyGen]   ✗ Trapdoor relationship FAILED (%d mismatches in first 16 coeffs)\n", mismatch_count);
-                        }
-                        
                         free(lhs_coeff);
                         free(beta_coeff);
                     }
@@ -275,7 +185,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         }
         free(A_omega_A);
     }
-    printf("[KeyGen] DIAGNOSTIC: End trapdoor verification\n\n");
 
     if (getenv("ARITH_DEBUG")) {
         poly_matrix y_immediate = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
@@ -339,8 +248,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     free(sum_term);
 
     if (getenv("ARITH_DEBUG")) {
-        printf("[KeyGen DIAG] Dumping A·omega_A and sum(B·omega) after sampling ωA\n");
-
         poly_matrix y = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
         if (y) {
             multiply_by_A(y, mpk->A, usk->omega_A);
@@ -427,17 +334,6 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         if (y) free(y);
     }
     
-    printf("[KeyGen]\n");
-    printf("[KeyGen] User secret key SKY:\n");
-    printf("[KeyGen]   - Auxiliary vector ωA: m=%d dimensional\n", PARAM_M);
-    printf("[KeyGen]   - Attribute vectors: %d vectors {ωi}\n", attr_set->count);
-    printf("[KeyGen]   - Total size: %d × %d = %d polynomials\n", 
-           attr_set->count + 1, PARAM_M, (attr_set->count + 1) * PARAM_M);
-    printf("[KeyGen]\n");
-    printf("[KeyGen] Optimization: Batched Gaussian sampling achieves\n");
-    printf("[KeyGen] 30-40%% lower overhead vs baseline Ring-LWE design\n");
-    printf("[KeyGen] due to smaller module dimension (k=%d, m=%d)\n", PARAM_D, PARAM_M);
-    
     return 0;
 }
 
@@ -467,7 +363,6 @@ int lcp_save_usk(const UserSecretKey *usk, const char *filename) {
     }
     
     fclose(fp);
-    printf("[KeyGen] User secret key saved to %s\n", filename);
     return 0;
 }
 
@@ -497,6 +392,5 @@ int lcp_load_usk(UserSecretKey *usk, const char *filename) {
     }
     
     fclose(fp);
-    printf("[KeyGen] User secret key loaded from %s\n", filename);
     return 0;
 }

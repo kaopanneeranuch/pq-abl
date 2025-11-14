@@ -23,6 +23,6 @@ int main(void) {
     /* save functions take (const obj*, filename) */
     lcp_save_mpk(&mpk, "keys/MPK.bin");
     lcp_save_msk(&msk, "keys/MSK.bin");
-    printf("Wrote keys/MPK.bin and keys/MSK.bin\n");
+    printf("Setup successful. Keys saved to: keys/\n");
     return 0;
 }

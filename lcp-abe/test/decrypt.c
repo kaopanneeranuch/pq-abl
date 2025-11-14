@@ -9,20 +9,44 @@
 #include "lcp-abe/keygen/lcp_keygen.h"
 #include "lcp-abe/decrypt/lcp_decrypt.h"
 #include "module_gaussian_lattice/Module_BFRS/arithmetic.h"
+#include "module_gaussian_lattice/Module_BFRS/sampling.h"
 #ifdef _WIN32
 #include <direct.h>
 #endif
 
 int main(int argc, char *argv[]) {
     // Initialize Module_BFRS components (required for polynomial operations)
-    printf("\n=== LCP-ABE Batch Decryption Test ===\n");
-    printf("[Init] Initializing Module_BFRS...\n");
     init_crt_trees();
     init_cplx_roots_of_unity();
-    /* init_D_lattice_coeffs() removed/absent in Module_BFRS - skip it */
+    init_D_lattice_coeffs();  // REQUIRED: Initialize l_coeffs, d_coeffs, h_coeffs for sampling
+    
+    // Parse command-line arguments
+    // Usage: test_decrypt [CT_obj_file] [SK_file]
+    //   - No args: decrypt all files in out/encrypted/ with default SK
+    //   - 1 arg: CT_obj file path (uses default SK)
+    //   - 2 args: CT_obj file path, SK file path
+    const char *sk_file = "keys/SK_admin_storage.bin";  // Default
+    const char *ctobj_file = NULL;
+    
+    if (argc > 1) {
+        // First argument is CT_obj file
+        ctobj_file = argv[1];
+    }
+    if (argc > 2) {
+        // Second argument is SK file
+        sk_file = argv[2];
+    }
+    
+    if (argc > 3) {
+        fprintf(stderr, "Usage: %s [CT_obj_file] [SK_file]\n", argv[0]);
+        fprintf(stderr, "  - No args: decrypt all files with default SK (keys/SK_admin_storage.bin)\n");
+        fprintf(stderr, "  - 1 arg (CT_obj_file): decrypt specific file with default SK\n");
+        fprintf(stderr, "  - 2 args (CT_obj_file SK_file): decrypt specific file with specified SK\n");
+        fprintf(stderr, "\nExample: %s out/encrypted/ctobj_xxx.bin keys/SK_admin_storage.bin\n", argv[0]);
+        return 1;
+    }
     
     // Load MPK and user secret key
-    printf("[Init] Loading keys...\n");
     MasterPublicKey mpk;
     UserSecretKey sk;
     
@@ -30,13 +54,12 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: Failed to load MPK\n");
         return 1;
     }
-    printf("[Init] Loaded MPK\n");
     
-    if (lcp_load_usk(&sk, "keys/SK_admin_storage.bin") != 0) {
-        fprintf(stderr, "Error: Failed to load user secret key\n");
+    if (lcp_load_usk(&sk, sk_file) != 0) {
+        fprintf(stderr, "Error: Failed to load user secret key from %s\n", sk_file);
+        fprintf(stderr, "Hint: Make sure the SK file exists and was generated with test_keygen\n");
         return 1;
     }
-    printf("[Init] Loaded SK (attributes: %d)\n", sk.attr_set.count);
     
     // Create output directory (cross-platform)
 #ifdef _WIN32
@@ -49,14 +72,12 @@ int main(int argc, char *argv[]) {
     uint32_t n_files = 0;
     
     // Check if specific file argument provided
-    if (argc > 1) {
+    if (ctobj_file != NULL) {
         // Single file mode
-        printf("\n[Mode] Single file decryption: %s\n", argv[1]);
-        ctobj_files[0] = argv[1];
+        ctobj_files[0] = (char*)ctobj_file;
         n_files = 1;
     } else {
         // Batch mode - find all CT_obj files in encrypted directory
-        printf("\n[Scan] Scanning for CT_obj files...\n");
         DIR *dir = opendir("out/encrypted");
         if (!dir) {
             fprintf(stderr, "Error: Cannot open out/encrypted/ directory\n");
@@ -84,20 +105,21 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Hint: Run test_encrypt first to generate encrypted files\n");
             return 1;
         }
-        
-        printf("[Scan] Found %d CT_obj files\n", n_files);
     }
     
     // Perform batch decryption with policy reuse optimization
-    printf("\n[Decrypt] Starting batch decryption...\n");
     decrypt_ctobj_batch((const char**)ctobj_files, n_files, &sk, &mpk, "out/decrypted");
     
     // Cleanup (only free if we allocated in batch mode)
-    if (argc <= 1) {
+    if (ctobj_file == NULL && argc <= 1) {
         for (uint32_t i = 0; i < n_files; i++) {
             free(ctobj_files[i]);
         }
     }
+    
+    // Free SK resources
+    usk_free(&sk);
+    mpk_free(&mpk);
         
     return 0;
 }
