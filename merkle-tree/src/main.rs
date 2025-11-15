@@ -22,7 +22,8 @@ use std::{
     fs::{File, OpenOptions},
     io::{prelude::*, BufReader},
     path::Path,
-    env};
+    env,
+    time::Instant};
 use sha3::{Digest, Sha3_256};
 use hex;
 
@@ -131,6 +132,12 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
     let mut is_lowestpair = true;
     let mut pair_count = 0;
     let mut tamper_rec: Vec<_> = Vec::new();
+    // Open temp_verify to write the verify result.
+    // let mut file_verify = OpenOptions::new()
+    //     .write(true)
+    //     .append(true)
+    //     .open("temp_verify")
+    //     .unwrap();
     while length > 1{
         let mut i = 0;
         while i < length {
@@ -148,16 +155,23 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
             // recompute proof hash
             // Check for the lowest pair if yes do print out
             if is_lowestpair{
-                // we compute and check hash digest with proof with only the lowest pair b/c our
+
                 // proof is in the lowest pair.
                 nodes[i / 2] = *compute_hash_tree_branch(digest_left, digest_right);
                 print!("Verify digest pair with proof {} : " , (pair_count + 1));
                 // compare i proof with new compute proof (from digest)
                 if proof[pair_count].as_bytes() == nodes[i / 2].as_bytes() {
                     println!("Valid");
+                    // if let Err(e) = writeln!(file_verify, "Verify digest pair with proof {} : Valid", pair_count + 1){
+                    //     eprintln!("Counldn't write to file: {}", e)
+                    //     }
+                // we compute and check hash digest with proof with only the lowest pair b/c our
                 }
                 else {
                     println!("Invalid");
+                    // if let Err(e) = writeln!(file_verify, "Verify digest pair with proof {} : Invalid", pair_count){
+                    //     eprintln!("Counldn't write to file: {}", e)
+                    //     }
                     tamper_rec.push(pair_count + 1);
                     // break;
                 }
@@ -171,11 +185,18 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
         if length == 1{
             if root[0].as_bytes() == proof_nodes[0].as_bytes(){
                 println!("Verify proof: Valid");
+                // if let Err(e) = writeln!(file_verify, "Verify proof : Invalid"){
+                //     eprintln!("Counldn't write to file: {}", e)
+                //     }
                 if tamper_rec.len() > 1{
                     print!("The digest that got tampered is in pair: ");
+                    // if let Err(e) = write!(file_verify, "The digest that got tampered is in pair : "){
+                    //     eprintln!("Counldn't write to file: {}", e)
+                    // }
                     let tamper_rec_len = tamper_rec.len();
                     for i in 0..tamper_rec_len {
                         print!("{}, ", tamper_rec[i]);
+                        // write!(file_verify, "{}, ", temper_rec[i]);
                     }
                     println!();
                 }
@@ -234,6 +255,7 @@ fn main() {
     else{
         let feature = &args[1];
         if feature == "compute" {
+            let _start_compute = Instant::now();
             let digest_path = &args[2];
             let _create_root_file = File::create("temp_root");
             let _create_proof_file = File::create("temp_proof");
@@ -253,12 +275,17 @@ fn main() {
             if let Err(e) = writeln!(file_root, "{}", merkle_root.to_hex_string()){
                 eprintln!("Counldn't write to file: {}", e)
                 }
+            let end_compute = Instant::now();
+            let _elapsed_compute = end_compute.duration_since(_start_compute);
+            println!("The merkle tree creation took: {:?}", _elapsed_compute);
         }
         else if feature == "verify" {
             if arg_len != 5{
                 println!("The argument missing:");
             }
             else{
+                let _create_root_file = File::create("temp_verify");
+                let _start_verity = Instant::now();
                 let ver_proof = &args[2];
                 let ver_digest = &args[3];
                 let ver_root = &args[4];
@@ -271,18 +298,11 @@ fn main() {
                 let hash_digest = decode(digest_verify);
                 let hash_root = decode(root_verify);
                 verify_proof_root(&hash_digest, &hash_proof, &hash_root);
+                let end_verify = Instant::now();
+                let _elapsed_verify = end_verify.duration_since(_start_verity);
 
-
+                println!("The verification took: {:?}", _elapsed_verify);
             }
         }
     }
-    // let data = vec![
-    //     b"Block 1".to_vec(),  value = [66, 108, 111, 99, 107, 32, 49]
-    //     b"Block 2".to_vec(),
-    //     b"Block 3".to_vec(),
-    //     b"Block 4".to_vec(),
-    // ];
-    // for d in data{
-    //     println!("{:?}", d);
-    // }
 }
