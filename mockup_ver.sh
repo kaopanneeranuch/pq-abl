@@ -1,6 +1,5 @@
-for num in 10 50 100 500 1000 5000 10000 50000 100000
+for num in 10 50 100 500 1000 5000 10000 25000 50000
 do 
-    $num
     echo "#### Generating $num logs ####"
     python3 gen_log.py -n $num -e 1 --start-days 30 --prefix log
     echo ""
@@ -11,17 +10,21 @@ do
     echo ""
 
     echo "#### Compute log digest to get proof and root ####"
-    ./merkle-tree-arm64 compute ./log_digest
+    ./merkle-tree-x86 compute ./log_digest
     echo ""
+
+
+    echo "#### Verify $num ####"
+    ./merkle-tree-x86 verify ./temp_proof ./log_digest ./temp_root > temp_verify
+    echo ""
+
+    tail -1 temp_verify
 
     echo "#### Delete all logs file ####"
     rm -rf ./logs
     echo ""
 
-    echo "#### Verify $num ####"
-    ./merkle-tree-arm64 verity ./temp_proof ./log_digest ./temp_root
-    echo ""
-
-    rm temp_proof temp_root log_digest 
+    echo "#### Cleaning $num environment ####"
+    rm temp_proof temp_root log_digest temp_verify
     sleep 2
 done
