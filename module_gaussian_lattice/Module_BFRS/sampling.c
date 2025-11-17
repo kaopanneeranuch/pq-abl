@@ -771,11 +771,43 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 		// delta = u - tmp (for all D components)
 		fprintf(stderr, "[sample_pre_target DEBUG] Computing deltas for %d components...\n", PARAM_D);
 		fflush(stderr);
+		// Validate u pointer and bounds before the loop
+		fprintf(stderr, "[sample_pre_target DEBUG] Validating u pointer: u=%p\n", (void*)u);
+		fflush(stderr);
+		if (!u) {
+			fprintf(stderr, "[sample_pre_target ERROR] u is NULL!\n");
+			fflush(stderr);
+			abort();
+		}
+		// Calculate expected size: u should be PARAM_D columns × PARAM_N elements
+		size_t u_expected_size = PARAM_D * PARAM_N * sizeof(scalar);
+		fprintf(stderr, "[sample_pre_target DEBUG] u expected size: %zu bytes\n", u_expected_size);
+		fflush(stderr);
+		
 		for (int comp = 0; comp < PARAM_D; comp++) {
 			fprintf(stderr, "[sample_pre_target DEBUG] Processing component %d/%d...\n", comp+1, PARAM_D);
 			fflush(stderr);
 			poly tmp_comp = poly_matrix_element(tmp, 1, comp, 0);
+			
+			// Calculate u_comp offset manually to verify
+			size_t u_offset = (PARAM_N) * ((comp) * (PARAM_D) + 0);
+			fprintf(stderr, "[sample_pre_target DEBUG] u_offset for comp %d: %zu elements (%zu bytes)\n", 
+			        comp, u_offset, u_offset * sizeof(scalar));
+			fflush(stderr);
+			
 			poly u_comp = poly_matrix_element(u, PARAM_D, comp, 0);
+			fprintf(stderr, "[sample_pre_target DEBUG] u_comp calculated: %p (u base: %p, offset: %zu bytes)\n",
+			        (void*)u_comp, (void*)u, (u_comp - u) * sizeof(scalar));
+			fflush(stderr);
+			
+			// Check if u_comp is within expected bounds
+			if (u_comp < u || u_comp >= u + PARAM_D * PARAM_N) {
+				fprintf(stderr, "[sample_pre_target ERROR] u_comp out of bounds! u=%p, u_comp=%p, max=%p\n",
+				        (void*)u, (void*)u_comp, (void*)(u + PARAM_D * PARAM_N));
+				fflush(stderr);
+				abort();
+			}
+			
 			poly delta = poly_matrix_element(deltas, 1, comp, 0);
 			
 			fprintf(stderr, "[sample_pre_target DEBUG] Computing delta[%d] = u[%d] - tmp[%d]...\n", comp, comp, comp);
