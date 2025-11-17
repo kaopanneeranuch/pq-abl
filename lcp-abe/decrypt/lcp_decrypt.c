@@ -1040,6 +1040,217 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
 // Batch Decryption with Policy Reuse Optimization
 // ============================================================================
 
+// Cache structure for policy-specific computations
+typedef struct {
+    char policy[MAX_POLICY_SIZE];
+    int valid;
+    int policy_satisfied;
+    scalar coefficients[MAX_ATTRIBUTES];
+    uint32_t n_coeffs;
+    poly_matrix A_omega_A;  // Cached expensive multiply_by_A result
+} PolicyDecryptCache;
+
+// Optimized ABE decryption using cached policy computations
+static int lcp_abe_decrypt_cached(const ABECiphertext *ct_abe,
+                                  const UserSecretKey *usk,
+                                  const MasterPublicKey *mpk,
+                                  const PolicyDecryptCache *cache,
+                                  uint8_t key_out[AES_KEY_SIZE]) {
+    // Use cached policy satisfaction result
+    if (!cache->policy_satisfied) {
+        return -1;
+    }
+    
+    poly recovered = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!recovered) {
+        return -1;
+    }
+    
+    memcpy(recovered, ct_abe->ct_key, PARAM_N * sizeof(scalar));
+    
+    poly decryption_term_crt = (poly)calloc(PARAM_N, sizeof(scalar));
+    poly decryption_term_coeff = (poly)calloc(PARAM_N, sizeof(scalar));
+    
+    if (!decryption_term_crt || !decryption_term_coeff) {
+        free(recovered);
+        if (decryption_term_crt) free(decryption_term_crt);
+        if (decryption_term_coeff) free(decryption_term_coeff);
+        return -1;
+    }
+    
+    // Step 1: Compute (A·ω_A)[0]·C0[0] using cached A_omega_A
+    poly A_omega_A_0 = poly_matrix_element(cache->A_omega_A, 1, 0, 0);
+    poly c0_0 = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+    
+    double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+    if (!prod) {
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
+    }
+    
+    mul_crt_poly(prod, A_omega_A_0, c0_0, LOG_R);
+    
+    poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+    if (!prod_reduced) {
+        free(prod);
+        free(decryption_term_crt);
+        free(decryption_term_coeff);
+        free(recovered);
+        return -1;
+    }
+    
+    reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+    memcpy(decryption_term_crt, prod_reduced, PARAM_N * sizeof(scalar));
+    freeze_poly(decryption_term_crt, PARAM_N - 1);
+    
+    free(prod);
+    free(prod_reduced);
+    
+    // Step 2: Compute policy attribute contributions using cached coefficients
+    for (uint32_t i = 0; i < cache->n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
+        if (cache->coefficients[i] == 0) continue;
+        
+        uint32_t policy_attr_idx = ct_abe->policy.rho[i];
+        
+        int omega_idx = -1;
+        for (uint32_t j = 0; j < usk->attr_set.count; j++) {
+            if (usk->attr_set.attrs[j].index == policy_attr_idx) {
+                omega_idx = j;
+                break;
+            }
+        }
+        
+        if (omega_idx == -1) {
+            free(decryption_term_crt);
+            free(decryption_term_coeff);
+            free(recovered);
+            return -1;
+        }
+        
+        // Compute (B+_attr · ω[ρ(i)])[0]·C0[0]
+        poly B_omega_attr = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!B_omega_attr) {
+            free(decryption_term_crt);
+            free(decryption_term_coeff);
+            free(recovered);
+            return -1;
+        }
+        zero_poly(B_omega_attr, PARAM_N - 1);
+        
+        poly_matrix B_plus_attr = &mpk->B_plus[policy_attr_idx * PARAM_M * PARAM_N];
+        
+        for (uint32_t j = 0; j < PARAM_M; j++) {
+            poly B_ij = &B_plus_attr[j * PARAM_N];
+            poly omega_ij = poly_matrix_element(usk->omega_i[omega_idx], 1, j, 0);
+            
+            double_poly prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+            if (!prod) {
+                free(B_omega_attr);
+                free(decryption_term_crt);
+                free(decryption_term_coeff);
+                free(recovered);
+                return -1;
+            }
+            
+            mul_crt_poly(prod, B_ij, omega_ij, LOG_R);
+            
+            poly prod_reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+            if (!prod_reduced) {
+                free(prod);
+                free(B_omega_attr);
+                free(decryption_term_crt);
+                free(decryption_term_coeff);
+                free(recovered);
+                return -1;
+            }
+            
+            reduce_double_crt_poly(prod_reduced, prod, LOG_R);
+            add_poly(B_omega_attr, B_omega_attr, prod_reduced, PARAM_N - 1);
+            freeze_poly(B_omega_attr, PARAM_N - 1);
+            
+            free(prod);
+            free(prod_reduced);
+        }
+        
+        poly c0_0_step2 = poly_matrix_element(ct_abe->C0, 1, 0, 0);
+        double_poly prod_B_omega_c = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+        if (!prod_B_omega_c) {
+            free(B_omega_attr);
+            free(decryption_term_crt);
+            free(decryption_term_coeff);
+            free(recovered);
+            return -1;
+        }
+        
+        mul_crt_poly(prod_B_omega_c, B_omega_attr, c0_0_step2, LOG_R);
+        
+        poly scaled_contribution = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!scaled_contribution) {
+            free(prod_B_omega_c);
+            free(B_omega_attr);
+            free(decryption_term_crt);
+            free(decryption_term_coeff);
+            free(recovered);
+            return -1;
+        }
+        
+        reduce_double_crt_poly(scaled_contribution, prod_B_omega_c, LOG_R);
+        
+        // Scale by cached coefficient and add to decryption_term
+        for (uint32_t k = 0; k < PARAM_N; k++) {
+            uint64_t scaled = ((uint64_t)scaled_contribution[k] * (uint64_t)cache->coefficients[i]) % PARAM_Q;
+            decryption_term_crt[k] = (decryption_term_crt[k] + scaled) % PARAM_Q;
+        }
+        freeze_poly(decryption_term_crt, PARAM_N - 1);
+        
+        free(prod_B_omega_c);
+        free(B_omega_attr);
+        free(scaled_contribution);
+    }
+    
+    memcpy(decryption_term_coeff, decryption_term_crt, PARAM_N * sizeof(scalar));
+    coeffs_representation(decryption_term_coeff, LOG_R);
+    freeze_poly(decryption_term_coeff, PARAM_N - 1);
+    
+    // Extract key from recovered polynomial
+    for (uint32_t i = 0; i < PARAM_N; i++) {
+        int64_t diff = (int64_t)recovered[i] - (int64_t)decryption_term_coeff[i];
+        if (diff < 0) {
+            diff += PARAM_Q;
+        }
+        recovered[i] = (uint32_t)(diff % PARAM_Q);
+    }
+    
+    // Extract bytes from recovered polynomial
+    const uint32_t shift = PARAM_K - 8;
+    const uint32_t Q_half = PARAM_Q / 2;
+    
+    for (uint32_t i = 0; i < AES_KEY_SIZE && i < PARAM_N; i++) {
+        uint64_t val = (uint64_t)recovered[i];
+        uint64_t rounded1 = (val + (1ULL << (shift - 1))) >> shift;
+        uint64_t rounded = rounded1;
+        
+        if (rounded1 < 64 && val < (1ULL << 21)) {
+            uint64_t val_plus_q = val + PARAM_Q;
+            uint64_t rounded_alt = (val_plus_q + (1ULL << (shift - 1))) >> shift;
+            if (rounded_alt <= 255 && rounded_alt > rounded1) {
+                rounded = rounded_alt;
+            }
+        }
+        
+        if (rounded > 255) rounded = 255;
+        key_out[i] = (uint8_t)rounded;
+    }
+    
+    free(decryption_term_crt);
+    free(decryption_term_coeff);
+    free(recovered);
+    
+    return 0;
+}
+
 int decrypt_ctobj_batch(const char **filenames,
                        uint32_t n_files,
                        const UserSecretKey *usk,
@@ -1047,6 +1258,12 @@ int decrypt_ctobj_batch(const char **filenames,
                        const char *output_dir) {
     uint32_t success_count = 0;
     uint32_t abe_decryptions = 0;
+    uint32_t cache_hits = 0;
+    
+    // Policy cache (one entry per unique policy)
+    PolicyDecryptCache policy_cache[10];
+    memset(policy_cache, 0, sizeof(policy_cache));  // Initialize all entries as invalid
+    uint32_t n_cached_policies = 0;
     
     for (uint32_t i = 0; i < n_files; i++) {
         // Load CT_obj
@@ -1056,14 +1273,71 @@ int decrypt_ctobj_batch(const char **filenames,
             continue;
         }
         
-        uint8_t k_log[AES_KEY_SIZE];
+        // Find or create policy cache entry
+        PolicyDecryptCache *cache = NULL;
+        uint32_t cache_idx = 0;
+        for (uint32_t j = 0; j < n_cached_policies; j++) {
+            if (policy_cache[j].valid && 
+                strcmp(policy_cache[j].policy, log.ct_abe.policy.expression) == 0) {
+                cache = &policy_cache[j];
+                cache_idx = j;
+                cache_hits++;
+                break;
+            }
+        }
         
-        // Each file has its own unique k_log encrypted with ABE
-        // We cannot cache keys by policy - each file must be decrypted separately
-        int decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
+        // If cache miss, populate cache with expensive computations
+        if (!cache && n_cached_policies < 10) {
+            cache = &policy_cache[n_cached_policies];
+            cache_idx = n_cached_policies;
+            n_cached_policies++;
+            
+            // Initialize cache entry
+            strncpy(cache->policy, log.ct_abe.policy.expression, MAX_POLICY_SIZE - 1);
+            cache->policy[MAX_POLICY_SIZE - 1] = '\0';
+            cache->valid = 1;
+            
+            // Check policy satisfaction (cacheable)
+            cache->policy_satisfied = lsss_check_satisfaction(&log.ct_abe.policy, &usk->attr_set);
+            
+            if (!cache->policy_satisfied) {
+                fprintf(stderr, "[Decrypt] FAILED: Policy not satisfied for file %u\n", i + 1);
+                cache->valid = 0;  // Mark as invalid
+                encrypted_log_free(&log);
+                continue;
+            }
+            
+            // Compute coefficients (cacheable)
+            lsss_compute_coefficients(&log.ct_abe.policy, &usk->attr_set, 
+                                     cache->coefficients, &cache->n_coeffs);
+            
+            // Compute A_omega_A (expensive, cacheable)
+            cache->A_omega_A = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+            if (!cache->A_omega_A) {
+                fprintf(stderr, "[Decrypt] ERROR: Failed to allocate A_omega_A for cache\n");
+                cache->valid = 0;
+                encrypted_log_free(&log);
+                continue;
+            }
+            multiply_by_A(cache->A_omega_A, mpk->A, usk->omega_A);
+        } else if (!cache) {
+            // Cache full, fall back to non-cached decryption
+            fprintf(stderr, "[Decrypt] Warning: Policy cache full, using non-cached decryption\n");
+        }
+        
+        uint8_t k_log[AES_KEY_SIZE];
+        int decrypt_result;
+        
+        // Use cached decryption if available, otherwise fall back to standard
+        if (cache && cache->valid) {
+            decrypt_result = lcp_abe_decrypt_cached(&log.ct_abe, usk, mpk, cache, k_log);
+        } else {
+            // Fallback to standard decryption (no cache)
+            decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
+        }
         
         if (decrypt_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: Policy not satisfied or decryption error for file %u\n", i + 1);
+            fprintf(stderr, "[Decrypt] FAILED: Decryption error for file %u\n", i + 1);
             encrypted_log_free(&log);
             continue;
         }
@@ -1141,11 +1415,19 @@ int decrypt_ctobj_batch(const char **filenames,
         success_count++;
     }
     
+    // Free cached A_omega_A matrices
+    for (uint32_t i = 0; i < n_cached_policies; i++) {
+        if (policy_cache[i].valid && policy_cache[i].A_omega_A) {
+            free(policy_cache[i].A_omega_A);
+        }
+    }
+    
     if (success_count == 0) {
         fprintf(stderr, "Decryption failed: No files successfully decrypted\n");
     } else {
-        fprintf(stderr, "[Decrypt] Success: %u/%u files decrypted, %u ABE decryptions\n",
-            success_count, n_files, abe_decryptions);
+        fprintf(stderr, "[Decrypt] Success: %u/%u files decrypted, %u ABE decryptions, %u cache hits (%.1f%%)\n",
+            success_count, n_files, abe_decryptions, cache_hits,
+            n_files > 0 ? (100.0 * cache_hits / n_files) : 0.0);
     }
     
     return 0;
