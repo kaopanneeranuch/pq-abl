@@ -10,12 +10,12 @@ do
     echo ""
 
     echo "#### Compute log digest to get proof and root ####"
-    ./merkle-tree-x86 compute ./log_digest
+    ./merkle-tree-arm64 compute ./log_digest
     echo ""
 
 
     echo "#### Verify $num ####"
-    ./merkle-tree-x86 verify ./temp_proof ./log_digest ./temp_root > temp_verify
+    ./merkle-tree-arm64 verify ./temp_proof ./log_digest ./temp_root > temp_verify
     echo ""
 
     tail -1 temp_verify
