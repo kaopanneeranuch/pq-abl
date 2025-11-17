@@ -879,6 +879,8 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
         fclose(fp);
         return -1;
     }
+    // Ensure null termination (fread doesn't add null terminator)
+    log->ct_abe.policy.expression[MAX_POLICY_SIZE - 1] = '\0';
     if (fread(&log->ct_abe.n_components, sizeof(uint32_t), 1, fp) != 1) {
         fprintf(stderr, "[Load] Error: Failed to read n_components\n");
         free(log->ct_sym.ciphertext);
@@ -963,6 +965,7 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     
     // Read rho
     uint32_t matrix_rows;
+    uint32_t *saved_rho = NULL;
     if (fread(&matrix_rows, sizeof(uint32_t), 1, fp) != 1) {
         fprintf(stderr, "[Load] Error: Failed to read matrix_rows\n");
         free(log->ct_abe.ct_key);
@@ -974,10 +977,9 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
         return -1;
     }
     if (matrix_rows > 0) {
-        log->ct_abe.policy.matrix_rows = matrix_rows;
-        log->ct_abe.policy.rho = (uint32_t*)malloc(matrix_rows * sizeof(uint32_t));
-        if (!log->ct_abe.policy.rho) {
-            fprintf(stderr, "[Load] Error: Failed to allocate rho\n");
+        saved_rho = (uint32_t*)malloc(matrix_rows * sizeof(uint32_t));
+        if (!saved_rho) {
+            fprintf(stderr, "[Load] Error: Failed to allocate saved_rho\n");
             free(log->ct_abe.ct_key);
             for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
             free(log->ct_abe.C);
@@ -986,9 +988,9 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
             fclose(fp);
             return -1;
         }
-        if (fread(log->ct_abe.policy.rho, sizeof(uint32_t), matrix_rows, fp) != matrix_rows) {
+        if (fread(saved_rho, sizeof(uint32_t), matrix_rows, fp) != matrix_rows) {
             fprintf(stderr, "[Load] Error: Failed to read rho\n");
-            free(log->ct_abe.policy.rho);
+            free(saved_rho);
             free(log->ct_abe.ct_key);
             for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
             free(log->ct_abe.C);
@@ -1000,6 +1002,37 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
     }
     
     fclose(fp);
+    
+    // Rebuild LSSS matrix from loaded policy (required for decryption)
+    // The share_matrix needs to be rebuilt for lsss_check_satisfaction and lsss_compute_coefficients
+    if (lsss_policy_to_matrix(&log->ct_abe.policy) != 0) {
+        fprintf(stderr, "[Load] Error: Failed to rebuild LSSS matrix for policy\n");
+        if (saved_rho) free(saved_rho);
+        free(log->ct_abe.ct_key);
+        for (uint32_t k = 0; k < log->ct_abe.n_components; k++) free(log->ct_abe.C[k]);
+        free(log->ct_abe.C);
+        free(log->ct_sym.ciphertext);
+        free(log->ct_abe.C0);
+        return -1;
+    }
+    
+    // Restore rho and matrix_rows from file (lsss_policy_to_matrix may have overwritten them)
+    // CRITICAL: The rho from file must be used because it matches the encryption-time mapping
+    // The share_matrix created by lsss_policy_to_matrix is correct (deterministic for AND policies),
+    // but we must use the rho that was saved during encryption
+    if (matrix_rows > 0 && saved_rho) {
+        if (log->ct_abe.policy.rho) {
+            free(log->ct_abe.policy.rho);
+        }
+        // Restore the exact matrix structure from encryption time
+        log->ct_abe.policy.matrix_rows = matrix_rows;
+        if (log->ct_abe.policy.matrix_cols != matrix_rows) {
+            // Ensure matrix_cols matches (should already be set by lsss_policy_to_matrix)
+            log->ct_abe.policy.matrix_cols = matrix_rows;
+        }
+        log->ct_abe.policy.rho = saved_rho;
+    }
+    
     return 0;
 }
 
@@ -1007,22 +1040,12 @@ int load_ctobj_file(const char *filename, EncryptedLogObject *log) {
 // Batch Decryption with Policy Reuse Optimization
 // ============================================================================
 
-typedef struct {
-    char policy[MAX_POLICY_SIZE];
-    uint8_t k_log[AES_KEY_SIZE];
-    int valid;
-} PolicyKeyCache;
-
 int decrypt_ctobj_batch(const char **filenames,
                        uint32_t n_files,
                        const UserSecretKey *usk,
                        const MasterPublicKey *mpk,
                        const char *output_dir) {
-    PolicyKeyCache cache[100];
-    uint32_t n_cached = 0;
-    
     uint32_t success_count = 0;
-    uint32_t cache_hits = 0;
     uint32_t abe_decryptions = 0;
     
     for (uint32_t i = 0; i < n_files; i++) {
@@ -1034,26 +1057,18 @@ int decrypt_ctobj_batch(const char **filenames,
         }
         
         uint8_t k_log[AES_KEY_SIZE];
-        int found_in_cache = 0;
         
-        if (!found_in_cache) {
-            int decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
-            
-            if (decrypt_result != 0) {
-                fprintf(stderr, "[Decrypt] FAILED: Policy not satisfied or decryption error\n");
-                encrypted_log_free(&log);
-                continue;
-            }
-            
-            abe_decryptions++;
-            
-            if (n_cached < 100) {
-                strncpy(cache[n_cached].policy, log.ct_abe.policy.expression, MAX_POLICY_SIZE);
-                memcpy(cache[n_cached].k_log, k_log, AES_KEY_SIZE);
-                cache[n_cached].valid = 1;
-                n_cached++;
-            }
+        // Each file has its own unique k_log encrypted with ABE
+        // We cannot cache keys by policy - each file must be decrypted separately
+        int decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
+        
+        if (decrypt_result != 0) {
+            fprintf(stderr, "[Decrypt] FAILED: Policy not satisfied or decryption error for file %u\n", i + 1);
+            encrypted_log_free(&log);
+            continue;
         }
+        
+        abe_decryptions++;
         
         uint8_t *log_data = NULL;
         size_t log_len = 0;
@@ -1062,7 +1077,11 @@ int decrypt_ctobj_batch(const char **filenames,
                                                &log_data, &log_len);
         
         if (sym_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed\n");
+            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u (policy: %s)\n", 
+                i + 1, log.ct_abe.policy.expression);
+            // Debug: print first few bytes of key to verify it's not all zeros
+            fprintf(stderr, "[Decrypt] Debug: k_log[0:4] = %02x %02x %02x %02x\n",
+                k_log[0], k_log[1], k_log[2], k_log[3]);
             encrypted_log_free(&log);
             continue;
         }
@@ -1124,6 +1143,9 @@ int decrypt_ctobj_batch(const char **filenames,
     
     if (success_count == 0) {
         fprintf(stderr, "Decryption failed: No files successfully decrypted\n");
+    } else {
+        fprintf(stderr, "[Decrypt] Success: %u/%u files decrypted, %u ABE decryptions\n",
+            success_count, n_files, abe_decryptions);
     }
     
     return 0;
