@@ -31,6 +31,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/lcp-abe/keygen
     ${CMAKE_SOURCE_DIR}/lcp-abe/encrypt
     ${CMAKE_SOURCE_DIR}/lcp-abe/decrypt
+    ${CMAKE_SOURCE_DIR}/lcp-abe/revocation
     ${CMAKE_SOURCE_DIR}/module_gaussian_lattice/Module_BFRS
 )
 
@@ -56,6 +57,7 @@ set(LCP_ABE_SOURCES
     lcp-abe/encrypt/lcp_encrypt.c
     lcp-abe/encrypt/aes_gcm.c
     lcp-abe/decrypt/lcp_decrypt.c
+    lcp-abe/revocation/lcp_revocation.c
 )
 
 # Build Module_BFRS library
@@ -115,25 +117,15 @@ target_link_libraries(test_decrypt lcp_abe)
 add_executable(test_decrypt_all lcp-abe/test/decrypt_all.c)
 target_link_libraries(test_decrypt_all lcp_abe)
 
-# Removed test_verify_keygen - file doesn't exist
-# add_executable(test_verify_keygen lcp-abe/test/verify_keygen.c)
-# target_link_libraries(test_verify_keygen lcp_abe)
+# Revocation test
+add_executable(test_revocation lcp-abe/test/revocation.c)
+target_include_directories(test_revocation PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
+target_link_libraries(test_revocation PRIVATE lcp_abe module_bfrs)
 
-# Removed coeffs_linearity - file was deleted
-# add_executable(coeffs_linearity lcp-abe/test/coeffs_linearity.c)
-# target_link_libraries(coeffs_linearity lcp_abe)
-
-# Removed coeffs_failing_case - file was deleted
-# add_executable(coeffs_failing_case lcp-abe/test/coeffs_failing_case.c)
-# target_link_libraries(coeffs_failing_case lcp_abe)
-
-# Removed test_diagnostic - file was deleted
-# add_executable(test_diagnostic test_diagnostic.c)
-# target_include_directories(test_diagnostic PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
-# target_link_libraries(test_diagnostic PRIVATE lcp_abe module_bfrs)
-# if(NOT MSVC)
-#     target_link_libraries(test_diagnostic PRIVATE m)
-# endif()
+# Link math library (needed for GCC/Clang, but not MSVC)
+if(NOT MSVC)
+    target_link_libraries(test_revocation PRIVATE m)
+endif()
 
 # Utility to view CT_obj files
 add_executable(view_ctobj lcp-abe/util/view_ctobj.c)

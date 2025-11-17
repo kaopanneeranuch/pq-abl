@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
     //   - No args: decrypt all files in out/encrypted/ with default SK
     //   - 1 arg: CT_obj file path (uses default SK)
     //   - 2 args: CT_obj file path, SK file path
-    const char *sk_file = "keys/SK_admin_storage.bin";  // Default
+    const char *sk_file = "keys/SK_admin_storage_team.bin";  // Default
     const char *ctobj_file = NULL;
     
     if (argc > 1) {

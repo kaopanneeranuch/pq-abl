@@ -339,6 +339,8 @@ void module_sample_G(signed_poly_matrix t, poly_matrix u)
 void sample_2z(signed_scalar *q, cplx_poly cplx_q, cplx_poly a, cplx_poly b, cplx_poly d, cplx *c, int depth)
 	{
 	int deg = PARAM_N >> depth;
+	fprintf(stderr, "[sample_2z DEBUG] Starting, deg=%d, depth=%d\n", deg, depth);
+	fflush(stderr);
 
 	
 	// Split q = (q0, q1) and c = (c0, c1) in half, and copy c1
@@ -352,38 +354,60 @@ void sample_2z(signed_scalar *q, cplx_poly cplx_q, cplx_poly a, cplx_poly b, cpl
 
 	
 	// b_times_d_inv <- b * d^(-1)
+	fprintf(stderr, "[sample_2z DEBUG] Computing b * d^(-1)...\n");
+	fflush(stderr);
 	cplx b_times_d_inv_coeffs[deg];
 	cplx_poly b_times_d_inv = b_times_d_inv_coeffs;
 	
 	div_cplx_poly(b_times_d_inv, b, d, deg-1);
+	fprintf(stderr, "[sample_2z DEBUG] b * d^(-1) computed\n");
+	fflush(stderr);
 	
 	// Sample q1 with covariance d and center c1
+	fprintf(stderr, "[sample_2z DEBUG] Sampling q1 (deg=%d, depth=%d)...\n", deg, depth);
+	fflush(stderr);
 	sample_fz(q1, cplx_q1, d, c1_bis, depth);
-	
+	fprintf(stderr, "[sample_2z DEBUG] q1 sampled\n");
+	fflush(stderr);
 
 	// Compute the new covariance
 	// a <- a - b^T * d^(-1) * b
+	fprintf(stderr, "[sample_2z DEBUG] Computing new covariance a...\n");
+	fflush(stderr);
 	fmsub_transpose_cplx_poly(a, b_times_d_inv, b, deg-1);
+	fprintf(stderr, "[sample_2z DEBUG] New covariance computed\n");
+	fflush(stderr);
 	
 	// Compute the new center
 	// c0 <- c0 + b * d^(-1) * (q1 - c1)
-	
+	fprintf(stderr, "[sample_2z DEBUG] Computing new center c0...\n");
+	fflush(stderr);
 	sub_cplx_poly(c1, cplx_q1, c1, deg - 1); // we don't need c1 anymore so we can overwrite it with (q1 - c1)
 
 	fma_cplx_poly(c0, b_times_d_inv, c1, deg - 1);
+	fprintf(stderr, "[sample_2z DEBUG] New center computed\n");
+	fflush(stderr);
 	
 	
 	
 	// Sample q0 with the new covariance and the new center
+	fprintf(stderr, "[sample_2z DEBUG] Sampling q0 (deg=%d, depth=%d)...\n", deg, depth);
+	fflush(stderr);
 	sample_fz(q0, cplx_q0, a, c0, depth);
+	fprintf(stderr, "[sample_2z DEBUG] q0 sampled\n");
+	fflush(stderr);
 	
 	// Update cplx_q by merging q0 and q1 the FFT way
 	// Defensive: avoid calling with negative depth (UB when depth == 0)
+	fprintf(stderr, "[sample_2z DEBUG] Merging q0 and q1...\n");
+	fflush(stderr);
 	if (depth > 0) {
 		inverse_stride(cplx_q, depth - 1);
 	} else {
 		inverse_stride(cplx_q, 0);
 	}
+	fprintf(stderr, "[sample_2z DEBUG] sample_2z complete, deg=%d, depth=%d\n", deg, depth);
+	fflush(stderr);
 	}
 
 /*
@@ -396,16 +420,37 @@ void sample_fz(signed_scalar *p, cplx_poly cplx_p, cplx_poly f, cplx *c, int dep
 	if(deg == 1)
 		{
 		// f is a real polynomial of degree 0, so Re(f[0]) = f[0] = f(-1) = f
+		real f_val = creal(f[0]);
+		if (f_val <= 0) {
+			fprintf(stderr, "[sample_fz ERROR] deg=1, depth=%d, f[0]=%e is NEGATIVE or ZERO! This will cause NaN in sqrt()!\n", depth, f_val);
+			fprintf(stderr, "[sample_fz ERROR] This indicates invalid Schur complement values (negative covariance).\n");
+			fprintf(stderr, "[sample_fz ERROR] The trapdoor rotation may have produced an invalid trapdoor.\n");
+			fflush(stderr);
+			// This will cause SampleZ to hang, but we've logged the error
+		}
+		real sigma = sqrt(f_val);
+		fprintf(stderr, "[sample_fz DEBUG] deg=1, depth=%d, f[0]=%e, sigma=%e\n", depth, f_val, sigma);
+		fflush(stderr);
 		#ifdef TESTING_ZETA
 		p[0] = (creal(f[0]) <= 0);
 		#else
-		p[0] = SampleZ(*c, sqrt(creal(f[0])));
+		if (isnan(sigma) || isinf(sigma)) {
+			fprintf(stderr, "[sample_fz ERROR] sigma is NaN or Inf! Cannot call SampleZ. This will hang.\n");
+			fflush(stderr);
+		}
+		fprintf(stderr, "[sample_fz DEBUG] Calling SampleZ with c=%e, sigma=%e...\n", creal(*c), sigma);
+		fflush(stderr);
+		p[0] = SampleZ(*c, sigma);
+		fprintf(stderr, "[sample_fz DEBUG] SampleZ returned %d\n", p[0]);
+		fflush(stderr);
 		#endif
 		cplx_p[0] = p[0];
 		
 		return;
 		}
 	
+	fprintf(stderr, "[sample_fz DEBUG] deg=%d, depth=%d, calling sample_2z...\n", deg, depth);
+	fflush(stderr);
 	stride(f, depth);
 	stride(c, depth);
 	cplx_poly f0 = f, f1 = &f[deg/2];
@@ -419,6 +464,8 @@ void sample_fz(signed_scalar *p, cplx_poly cplx_p, cplx_poly f, cplx *c, int dep
 
 	
 	sample_2z(p, cplx_p, f0, f1, f0_bis, c, depth + 1);
+	fprintf(stderr, "[sample_fz DEBUG] sample_2z returned, deg=%d, depth=%d\n", deg, depth);
+	fflush(stderr);
 	scalar_stride(p, deg);
 	}
 
@@ -430,6 +477,9 @@ void sample_fz(signed_scalar *p, cplx_poly cplx_p, cplx_poly f, cplx *c, int dep
 */
 void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix sch_comp)
 	{
+	fprintf(stderr, "[sample_perturb DEBUG] Starting sample_perturb...\n");
+	fflush(stderr);
+	
 	// Validate sch_comp contains reasonable values
 	int bad_count = 0;
 	for(int i = 0; i < PARAM_N * PARAM_D * (2 * PARAM_D + 1); ++i) {
@@ -444,6 +494,8 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	if (bad_count > 0) {
 		fprintf(stderr, "[ERROR] Found %d invalid values in sch_comp! This will cause infinite loops.\n", bad_count);
 	}
+	fprintf(stderr, "[sample_perturb DEBUG] sch_comp validation complete (bad_count=%d)\n", bad_count);
+	fflush(stderr);
 	
 	//cplx T_coeffs[PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K], sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
 	//cplx *T_coeffs = malloc(PARAM_N * 2 * PARAM_D * PARAM_D * PARAM_K * sizeof(cplx)), sch_comp_coeffs[PARAM_N * PARAM_D * (2 * PARAM_D + 1)], c_coeffs[PARAM_N * 2 * PARAM_D], cplx_p_coeffs[PARAM_N * PARAM_D * PARAM_K];
@@ -454,16 +506,22 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	// First sample dk independant centred polynomials with covariance (zeta^2 - alpha^2)
 	signed_poly_matrix p_2d = poly_matrix_element(p, 1, 2 * PARAM_D, 0);
 	
+	fprintf(stderr, "[sample_perturb DEBUG] Sampling %d independent polynomials...\n", PARAM_N * PARAM_D * PARAM_K);
+	fflush(stderr);
 	real param = sqrt((PARAM_ZETA * PARAM_ZETA) - (PARAM_ALPHA * PARAM_ALPHA));
 	for(int i = 0 ; i < PARAM_N * PARAM_D * PARAM_K ; ++i)
 		{
 		p_2d[i] = SampleZ(0, param); // add q so that the coefficients are positive
 		}
+	fprintf(stderr, "[sample_perturb DEBUG] Independent polynomials sampled\n");
+	fflush(stderr);
 
 	
 
 	
 	// Compute the complex CRT transform of the sampled polynomials
+	fprintf(stderr, "[sample_perturb DEBUG] Computing complex CRT transform...\n");
+	fflush(stderr);
 	for(int i = 0 ; i < PARAM_N * PARAM_D * PARAM_K ; ++i)
 		{
 		cplx_p[i] = p_2d[i];
@@ -472,13 +530,23 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 
 	
 	matrix_cplx_crt_representation(cplx_p, PARAM_D * PARAM_K, 1);
+	fprintf(stderr, "[sample_perturb DEBUG] Complex CRT transform complete\n");
+	fflush(stderr);
 	
 	// Construct the new center (depends on the dk polynomials sampled before)
+	fprintf(stderr, "[sample_perturb DEBUG] Constructing first center...\n");
+	fflush(stderr);
 	construct_first_center(c, T, cplx_p);
+	fprintf(stderr, "[sample_perturb DEBUG] First center constructed\n");
+	fflush(stderr);
 	
 	// Sample 2d - 2 polynomials iteratively
+	fprintf(stderr, "[sample_perturb DEBUG] Sampling %d polynomials iteratively (i from %d down to 2)...\n", 2 * PARAM_D - 2, 2 * PARAM_D - 1);
+	fflush(stderr);
 	for(int i = 2 * PARAM_D - 1 ; i > 1 ; --i)
 		{
+		fprintf(stderr, "[sample_perturb DEBUG] Sampling polynomial i=%d...\n", i);
+		fflush(stderr);
 		// Sample p[i] with covariance sch_comp[i,i] and center c[i]
 		// (copying sch_comp[i,i] and c[i] since they're going to be modified)
 		signed_scalar *p_i = poly_matrix_element(p, 1, i, 0);
@@ -489,13 +557,25 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 		cplx_poly covariance = covariance_coeffs, center = center_coeffs;
 		memcpy(covariance, sch_comp_ii, PARAM_N * sizeof(cplx));
 		memcpy(center, c_i, PARAM_N * sizeof(cplx));
+		fprintf(stderr, "[sample_perturb DEBUG] Calling sample_fz for i=%d...\n", i);
+		fflush(stderr);
 		sample_fz(p_i, cplx_p, covariance, center, 0);
+		fprintf(stderr, "[sample_perturb DEBUG] sample_fz completed for i=%d\n", i);
+		fflush(stderr);
 		
 		// Update the center
+		fprintf(stderr, "[sample_perturb DEBUG] Updating center for i=%d...\n", i);
+		fflush(stderr);
 		construct_new_center(c, sch_comp, cplx_p, i);
+		fprintf(stderr, "[sample_perturb DEBUG] Center updated for i=%d\n", i);
+		fflush(stderr);
 		}
+	fprintf(stderr, "[sample_perturb DEBUG] Iterative sampling complete\n");
+	fflush(stderr);
 	
 	// Sample the last 2 polynomials with the specialized sample_2z algorithm (do not forget to copy the covariance first)
+	fprintf(stderr, "[sample_perturb DEBUG] Sampling last 2 polynomials with sample_2z...\n");
+	fflush(stderr);
 	cplx sch_comp_copy_coeffs[PARAM_N * 3];
 	cplx_poly_matrix sch_comp_copy = sch_comp_copy_coeffs;
 	
@@ -506,7 +586,13 @@ void sample_perturb(signed_poly_matrix p, cplx_poly_matrix T, cplx_poly_matrix s
 	transpose_cplx_poly(sch_comp_01, PARAM_N - 1); // transpose it since sch_comp[0, 1] = sch_comp[1, 0]^T
 	cplx_poly sch_comp_11 = triangular_poly_matrix_element(sch_comp_copy, 1, 1);
 	
+	fprintf(stderr, "[sample_perturb DEBUG] Calling sample_2z...\n");
+	fflush(stderr);
 	sample_2z((signed_scalar *) p, cplx_p, sch_comp_00, sch_comp_01, sch_comp_11, c, 0);
+	fprintf(stderr, "[sample_perturb DEBUG] sample_2z completed\n");
+	fflush(stderr);
+	fprintf(stderr, "[sample_perturb DEBUG] sample_perturb complete!\n");
+	fflush(stderr);
 	}
 
 /*
@@ -626,19 +712,30 @@ void sample_pre(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix 
 
 void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_matrix cplx_T, cplx_poly_matrix sch_comp, poly h_inv, poly_matrix u)
 	{
+	fprintf(stderr, "[sample_pre_target DEBUG] Starting sample_pre_target...\n");
+	fflush(stderr);
+	
 	// Sample a perturbation p in R^m
 	signed_scalar p_coeffs[PARAM_N * PARAM_M];
 	signed_poly_matrix p = p_coeffs;
 	
+	fprintf(stderr, "[sample_pre_target DEBUG] Calling sample_perturb...\n");
+	fflush(stderr);
 	sample_perturb(p, cplx_T, sch_comp);
+	fprintf(stderr, "[sample_pre_target DEBUG] sample_perturb returned\n");
+	fflush(stderr);
 	
 	// Add q to p's coeffs so that they are positive, and put p in the CRT domain
+	fprintf(stderr, "[sample_pre_target DEBUG] Adding PARAM_Q to p and converting to CRT...\n");
+	fflush(stderr);
 	for(int i = 0 ; i < PARAM_N * PARAM_M ; ++i)
 		{
 		p[i] += PARAM_Q;
 		}
 	
 	matrix_crt_representation((poly_matrix) p, PARAM_M, 1, LOG_R);
+	fprintf(stderr, "[sample_pre_target DEBUG] p converted to CRT\n");
+	fflush(stderr);
 
 	/* Adjust p's first d polynomials so that A * p == u (make p a particular solution)
 	 * This is necessary because TI spans the kernel of A: adding TI*z will not
@@ -647,32 +744,139 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	 * CRITICAL FIX: This adjustment MUST run unconditionally, not just in ARITH_DEBUG mode!
 	 * Without this, A * x = A * p ≠ u, breaking the trapdoor relationship.
 	 */
+	fprintf(stderr, "[sample_pre_target DEBUG] Adjusting p so that A * p == u...\n");
+	fflush(stderr);
 	// compute tmp = A * p (we'll reuse this result later to avoid recomputing A * p)
 	poly_matrix tmp = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
 	poly_matrix deltas = NULL;  // Store deltas for reuse
 	if (tmp) {
+		fprintf(stderr, "[sample_pre_target DEBUG] Computing tmp = A * p...\n");
+		fflush(stderr);
 		multiply_by_A(tmp, A_m, (poly_matrix) p);
+		fprintf(stderr, "[sample_pre_target DEBUG] tmp = A * p computed\n");
+		fflush(stderr);
 		
 		// Allocate storage for deltas (we'll reuse this to compute A * p_new efficiently)
+		fprintf(stderr, "[sample_pre_target DEBUG] Allocating deltas...\n");
+		fflush(stderr);
 		deltas = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
+		if (!deltas) {
+			fprintf(stderr, "[sample_pre_target ERROR] Failed to allocate deltas\n");
+			fflush(stderr);
+		} else {
+			fprintf(stderr, "[sample_pre_target DEBUG] Deltas allocated\n");
+			fflush(stderr);
+		}
 		
 		// delta = u - tmp (for all D components)
+		fprintf(stderr, "[sample_pre_target DEBUG] Computing deltas for %d components...\n", PARAM_D);
+		fflush(stderr);
 		for (int comp = 0; comp < PARAM_D; comp++) {
+			fprintf(stderr, "[sample_pre_target DEBUG] Processing component %d/%d...\n", comp+1, PARAM_D);
+			fflush(stderr);
 			poly tmp_comp = poly_matrix_element(tmp, 1, comp, 0);
 			poly u_comp = poly_matrix_element(u, PARAM_D, comp, 0);
 			poly delta = poly_matrix_element(deltas, 1, comp, 0);
 			
+			fprintf(stderr, "[sample_pre_target DEBUG] Computing delta[%d] = u[%d] - tmp[%d]...\n", comp, comp, comp);
+			fflush(stderr);
 			// delta = u_comp - tmp_comp
+			fprintf(stderr, "[sample_pre_target DEBUG] Copying u[%d] to delta[%d]...\n", comp, comp);
+			fflush(stderr);
+			fprintf(stderr, "[sample_pre_target DEBUG] u_comp=%p, delta=%p, size=%zu bytes\n", 
+			        (void*)u_comp, (void*)delta, (size_t)(PARAM_N * sizeof(scalar)));
+			fflush(stderr);
+			
+			// Validate pointers before memcpy
+			if (!u_comp || !delta) {
+				fprintf(stderr, "[sample_pre_target ERROR] Invalid pointer! u_comp=%p, delta=%p\n", 
+				        (void*)u_comp, (void*)delta);
+				fflush(stderr);
+				abort();
+			}
+			
+			fprintf(stderr, "[sample_pre_target DEBUG] Pointers validated, calling memcpy...\n");
+			fflush(stderr);
+			
+			// Test memory access with a small write first
+			fprintf(stderr, "[sample_pre_target DEBUG] Testing memory access (writing first element)...\n");
+			fflush(stderr);
+			
+			// First, try to READ from u_comp[0] to see if that's accessible
+			fprintf(stderr, "[sample_pre_target DEBUG] Attempting to read u_comp[0]...\n");
+			fflush(stderr);
+			scalar test_read = u_comp[0];
+			fprintf(stderr, "[sample_pre_target DEBUG] Successfully read u_comp[0] = %u\n", test_read);
+			fflush(stderr);
+			
+			// Now try to READ from delta[0] to see if that's accessible
+			fprintf(stderr, "[sample_pre_target DEBUG] Attempting to read delta[0]...\n");
+			fflush(stderr);
+			scalar test_read_delta = delta[0];
+			fprintf(stderr, "[sample_pre_target DEBUG] Successfully read delta[0] = %u\n", test_read_delta);
+			fflush(stderr);
+			
+			// Now try to WRITE to delta[0]
+			fprintf(stderr, "[sample_pre_target DEBUG] Attempting to write delta[0] = u_comp[0]...\n");
+			fflush(stderr);
+			delta[0] = test_read;  // Use the value we already read
+			fprintf(stderr, "[sample_pre_target DEBUG] First element written successfully: delta[0]=%u, u_comp[0]=%u\n", 
+			        delta[0], u_comp[0]);
+			fflush(stderr);
+			
+			// Test last element access
+			fprintf(stderr, "[sample_pre_target DEBUG] Testing last element access...\n");
+			fflush(stderr);
+			delta[PARAM_N-1] = u_comp[PARAM_N-1];
+			fprintf(stderr, "[sample_pre_target DEBUG] Last element written successfully\n");
+			fflush(stderr);
+			
+			// Now try memcpy for the full copy
+			fprintf(stderr, "[sample_pre_target DEBUG] About to call memcpy(delta=%p, u_comp=%p, size=%zu)...\n", 
+			        (void*)delta, (void*)u_comp, (size_t)(PARAM_N * sizeof(scalar)));
+			fflush(stderr);
+			
+			// Also write to stdout to see if stderr is the issue
+			fprintf(stdout, "[STDOUT] About to memcpy component %d\n", comp);
+			fflush(stdout);
+			
 			memcpy(delta, u_comp, PARAM_N * sizeof(scalar));
+			
+			fprintf(stderr, "[sample_pre_target DEBUG] memcpy returned, verifying...\n");
+			fflush(stderr);
+			fprintf(stdout, "[STDOUT] memcpy returned for component %d\n", comp);
+			fflush(stdout);
+			
+			// Verify memcpy completed by checking first and last element
+			if (delta[0] != u_comp[0] || delta[PARAM_N-1] != u_comp[PARAM_N-1]) {
+				fprintf(stderr, "[sample_pre_target ERROR] memcpy verification failed!\n");
+				fflush(stderr);
+				abort();
+			}
+			fprintf(stderr, "[sample_pre_target DEBUG] memcpy completed and verified for u[%d]\n", comp);
+			fflush(stderr);
+			
+			fprintf(stderr, "[sample_pre_target DEBUG] u[%d] copied, calling sub_poly(delta, delta, tmp[%d])...\n", comp, comp);
+			fflush(stderr);
 			sub_poly(delta, delta, tmp_comp, PARAM_N - 1);
+			fprintf(stderr, "[sample_pre_target DEBUG] sub_poly returned for delta[%d], freezing...\n", comp);
+			fflush(stderr);
 			freeze_poly(delta, PARAM_N - 1);
+			fprintf(stderr, "[sample_pre_target DEBUG] delta[%d] frozen\n", comp);
+			fflush(stderr);
 			
 			// Since A = [I_d | Ā], we can adjust p[comp] directly to fix the first D components
 			// For component comp, p[comp] contributes directly to A*p[comp] via the identity part
 			poly_matrix p_as_poly = (poly_matrix) p;
 			poly p_comp = poly_matrix_element(p_as_poly, 1, comp, 0);
+			fprintf(stderr, "[sample_pre_target DEBUG] Adjusting p[%d] = p[%d] + delta[%d]...\n", comp, comp, comp);
+			fflush(stderr);
 			add_poly(p_comp, p_comp, delta, PARAM_N - 1);
+			fprintf(stderr, "[sample_pre_target DEBUG] p[%d] added, freezing...\n", comp);
+			fflush(stderr);
 			freeze_poly(p_comp, PARAM_N - 1);
+			fprintf(stderr, "[sample_pre_target DEBUG] p[%d] adjusted and frozen\n", comp);
+			fflush(stderr);
 		}
 		// DON'T free tmp here - we'll reuse it!
 	} else {
@@ -707,6 +911,8 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	// Since A = [I_d | Ā] and we only adjusted the first D components of p,
 	// we can compute: A * p_new = tmp + deltas (component-wise for first D components)
 	
+	fprintf(stderr, "[sample_pre_target DEBUG] Computing v = -h_inv * A * p...\n");
+	fflush(stderr);
 	if (tmp && deltas) {
 		// OPTIMIZATION: v = tmp + deltas (component-wise)
 		// Since we adjusted p[comp] by delta[comp] for comp < D, and A = [I_d | Ā],
@@ -746,6 +952,8 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 		multiply_by_A(v, A_m, (poly_matrix) p);
 		free(zero_coeffs);
 	}
+	fprintf(stderr, "[sample_pre_target DEBUG] v computed\n");
+	fflush(stderr);
 
 	if (getenv("ARITH_DEBUG")) {
 		/* Dump v (first poly) and target u (first poly) in CRT for comparison */
@@ -761,7 +969,11 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 	}
 
 	/* Compute v <- v - u directly in-place (both are in CRT domain). */
+	fprintf(stderr, "[sample_pre_target DEBUG] Computing v = v - u...\n");
+	fflush(stderr);
 	sub_poly(v, v, u, PARAM_N * PARAM_D - 1);
+	fprintf(stderr, "[sample_pre_target DEBUG] v = v - u computed\n");
+	fflush(stderr);
 
 	/* If KeyGen provided an expected A·omega_A, compare it to our v (CRT)
 	 * before any h_inv / canonicalization. This will fail-fast with a
@@ -808,8 +1020,12 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 		}
 	}
     
+	fprintf(stderr, "[sample_pre_target DEBUG] Processing h_inv * v for %d components...\n", PARAM_D);
+	fflush(stderr);
 	for(int i = 0 ; i < PARAM_D ; ++i)
 		{
+		fprintf(stderr, "[sample_pre_target DEBUG] Processing component %d/%d...\n", i+1, PARAM_D);
+		fflush(stderr);
 		poly v_i = poly_matrix_element(v, 1, i, 0);
 
 		if (getenv("ARITH_DEBUG")) {
@@ -840,33 +1056,51 @@ void sample_pre_target(poly_matrix x, poly_matrix A_m, poly_matrix T, cplx_poly_
 		}
 	
 	// Put v back into the normal domain
+	fprintf(stderr, "[sample_pre_target DEBUG] Converting v to coefficient representation...\n");
+	fflush(stderr);
 	matrix_coeffs_representation(v, PARAM_D, 1, LOG_R);
+	fprintf(stderr, "[sample_pre_target DEBUG] v converted to coefficient\n");
+	fflush(stderr);
 	
 	// Sample z from the G-lattice with target v
 	signed_poly_matrix z = (signed_poly_matrix) poly_matrix_element(x, 1, 2 * PARAM_D, 0); // store z at the end of x to get TI * z for cheaper
 	
+	fprintf(stderr, "[sample_pre_target DEBUG] Calling module_sample_G...\n");
+	fflush(stderr);
 	module_sample_G(z, v);
+	fprintf(stderr, "[sample_pre_target DEBUG] module_sample_G returned\n");
+	fflush(stderr);
 
 	
 	// Make sure z has positive coefficients and put it in the CRT domain
+	fprintf(stderr, "[sample_pre_target DEBUG] Converting z to positive and CRT...\n");
+	fflush(stderr);
 	for(int i = 0 ; i < PARAM_N * PARAM_D * PARAM_K ; ++i)
 		{
 		z[i] += PARAM_Q;
 		}
 	
 	matrix_crt_representation((poly_matrix) z, PARAM_D * PARAM_K, 1, LOG_R);
+	fprintf(stderr, "[sample_pre_target DEBUG] z converted to CRT\n");
+	fflush(stderr);
 
 	
 	// Put T in the CRT domain
 	//matrix_crt_representation(T, 2 * PARAM_D, PARAM_D * PARAM_K, LOG_R);
 	
 	// x <- p + TI * z (in the CRT domain)
+	fprintf(stderr, "[sample_pre_target DEBUG] Computing x = p + T * z...\n");
+	fflush(stderr);
 	multiply_by_T(x, T, (poly_matrix) z); // only need to multiply by T since z is already at the end of x
+	fprintf(stderr, "[sample_pre_target DEBUG] T * z computed\n");
+	fflush(stderr);
 	
 	
 	add_poly(x, x, (poly) p, PARAM_N * PARAM_M - 1);
 	// Reduce x mod q one final time but keep it in the CRT domain
 	freeze_poly(x, PARAM_N * PARAM_M - 1);
+	fprintf(stderr, "[sample_pre_target DEBUG] sample_pre_target complete!\n");
+	fflush(stderr);
 
 	/* Debug: print pointer and first few coefficients of x (which should be the
 	 * caller's omega_A buffer). This helps detect aliasing/copy issues. */

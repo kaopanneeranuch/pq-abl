@@ -103,7 +103,17 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         }
     }
     
+    fprintf(stderr, "[KeyGen DEBUG] About to call sample_pre_target (this may take a moment)...\n");
+    fprintf(stdout, "[KeyGen STDOUT] About to call sample_pre_target\n");
+    fflush(stderr);
+    fflush(stdout);
+    
     sample_pre_target(usk->omega_A, mpk->A, msk->T, msk->cplx_T, msk->sch_comp, h_inv, target);
+    
+    fprintf(stderr, "[KeyGen DEBUG] sample_pre_target completed\n");
+    fprintf(stdout, "[KeyGen STDOUT] sample_pre_target completed\n");
+    fflush(stderr);
+    fflush(stdout);
     
     if (getenv("ARITH_DEBUG")) {
         fprintf(stderr, "[KEYGEN PTR] usk->omega_A=%p first8_coeffs:", (void*)usk->omega_A);
