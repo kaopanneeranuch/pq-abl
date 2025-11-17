@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <errno.h>
 #ifdef _WIN32
 #include <direct.h>
 #endif
@@ -15,6 +16,7 @@
 #include "../decrypt/lcp_decrypt.h"
 #include "../revocation/lcp_revocation.h"
 #include "../policy/lcp_policy.h"
+#include "../util/lcp_util.h"
 #include "../../module_gaussian_lattice/Module_BFRS/arithmetic.h"
 #include "../../module_gaussian_lattice/Module_BFRS/sampling.h"
 
@@ -36,7 +38,7 @@ int main(void) {
     // ========================================================================
     // Step 5: Execute Revocation (revoke "storage-team")
     // ========================================================================
-    printf("[STEP 5] Executing Revocation Workflow\n");
+    printf("Executing Revocation Workflow\n");
     printf("  Revoking attribute: team:storage-team\n\n");
     
     // Load existing keys
@@ -48,7 +50,7 @@ int main(void) {
         fprintf(stderr, "[ERROR] Failed to load MPK/MSK from keys/\n");
         return 1;
     }
-    printf("  ✓ Loaded MPK and MSK from keys/\n");
+    printf("  Loaded MPK and MSK from keys/\n");
     
     // Create initial policy: "admin AND storage-team"
     AccessPolicy policy_old;
@@ -99,13 +101,13 @@ int main(void) {
         fprintf(stderr, "[ERROR] Failed to save new MPK/MSK\n");
         return 5;
     }
-    printf("  ✓ Saved new MPK and MSK to keys_revocation/\n");
-    printf("[STEP 5] ✓ Revocation executed successfully\n\n");
+    printf("  Saved new MPK and MSK to keys_revocation/\n");
+    printf("Revocation executed successfully\n\n");
     
     // ========================================================================
     // Step 5 (continued): Regenerate SK for non-revoked users
     // ========================================================================
-    printf("[STEP 5b] Regenerating keys for non-revoked users\n");
+    printf("Regenerating keys for non-revoked users\n");
     
     // Create attribute set for admin only (without storage-team)
     AttributeSet attrs_new;
@@ -121,14 +123,11 @@ int main(void) {
     
     printf("  Calling lcp_regenerate_user_key...\n");
     fflush(stdout);
-    fprintf(stderr, "[Revocation Test] About to call lcp_regenerate_user_key...\n");
     fflush(stderr);
     
     int keygen_ret = lcp_regenerate_user_key(&mpk_new, &msk_new, &attrs_new, &usk_new);
     
-    fprintf(stderr, "[Revocation Test] lcp_regenerate_user_key returned: %d\n", keygen_ret);
     fflush(stderr);
-    printf("[Revocation Test] Key generation returned: %d\n", keygen_ret);
     fflush(stdout);
     
     if (keygen_ret != 0) {
@@ -138,7 +137,6 @@ int main(void) {
         // We'll test if it works in the decryption step
     }
     
-    fprintf(stderr, "[Revocation Test] About to save SK...\n");
     fflush(stderr);
     
     // Save new SK (even if keygen reported an error, the key might still be usable)
@@ -148,22 +146,25 @@ int main(void) {
         return 7;
     }
     
-    fprintf(stderr, "[Revocation Test] SK saved successfully\n");
     fflush(stderr);
     
     if (keygen_ret == 0) {
-        printf("  ✓ Generated and saved new SK for admin (without storage-team)\n");
+        printf("  Generated and saved new SK for admin (without storage-team)\n");
     } else {
-        printf("  ⚠ Generated and saved new SK (keygen reported error, but key may still work)\n");
+        printf("  [WARN] Generated and saved new SK (keygen reported error, but key may still work)\n");
     }
-    printf("  ✓ Saved to keys_revocation/SK_admin_new.bin\n");
-    printf("[STEP 5b] ✓ Key regeneration completed\n\n");
+    printf("  Saved to keys_revocation/SK_admin_new.bin\n");
+    printf("Key regeneration completed\n\n");
     
     // ========================================================================
     // Step 6: Encrypt with new policy "admin" → CT_new
     // ========================================================================
-    printf("[STEP 6] Encrypting with new policy\n");
+    printf("Encrypting with new policy\n");
     printf("  Policy: %s\n", policy_new.expression);
+    
+    // Test message for encryption/decryption
+    const char *test_message = "{\"action\":\"test\",\"data\":\"This is a test log entry for revocation\"}";
+    size_t msg_len = strlen(test_message);
     
     ABECiphertext ct_new;
     poly_matrix s_shared_new = NULL;
@@ -182,13 +183,213 @@ int main(void) {
         fprintf(stderr, "[ERROR] New encrypt key failed\n");
         return 9;
     }
-    printf("  ✓ Encrypted with new policy and MPK\n");
-    printf("[STEP 6] ✓ Encryption successful\n\n");
+    printf("  Encrypted K_log with new policy and MPK\n");
+    
+    // Save new ciphertext to out_revocation/encrypted
+    printf("  Encrypting log message and saving to out_revocation/encrypted...\n");
+#ifdef _WIN32
+    _mkdir("out_revocation");
+    _mkdir("out_revocation/encrypted");
+#else
+    mkdir("out_revocation", 0755);
+    mkdir("out_revocation/encrypted", 0755);
+#endif
+    
+    // Create EncryptedLogObject from ABECiphertext for saving
+    EncryptedLogObject log_new;
+    encrypted_log_init(&log_new);
+    
+    // Set metadata (test data)
+    strncpy(log_new.metadata.timestamp, "2024-01-01T12:00:00Z", sizeof(log_new.metadata.timestamp) - 1);
+    strncpy(log_new.metadata.user_id, "test_user", sizeof(log_new.metadata.user_id) - 1);
+    strncpy(log_new.metadata.user_role, "admin", sizeof(log_new.metadata.user_role) - 1);
+    strncpy(log_new.metadata.team, "test_team", sizeof(log_new.metadata.team) - 1);
+    strncpy(log_new.metadata.action_type, "test_action", sizeof(log_new.metadata.action_type) - 1);
+    strncpy(log_new.metadata.resource_id, "test_resource", sizeof(log_new.metadata.resource_id) - 1);
+    
+    // Copy ABE ciphertext (shallow copy - we'll free ct_new_final separately at the end)
+    // Note: This shares pointers with ct_new_final, so don't free log_new.ct_abe components
+    log_new.ct_abe = ct_new_final;
+    
+    // Encrypt actual log message with symmetric encryption (AES-GCM)
+    
+    // Generate nonce for symmetric encryption
+    rng_nonce(log_new.ct_sym.nonce);
+    
+    // Encrypt log message with AES-GCM using k_log_new
+    if (encrypt_log_symmetric((const uint8_t*)test_message, msg_len,
+                               k_log_new, log_new.ct_sym.nonce,
+                               &log_new.metadata, &log_new.ct_sym) != 0) {
+        fprintf(stderr, "[ERROR] Failed to encrypt log message symmetrically\n");
+        return 8;
+    }
+    
+    printf("  Encrypted log message with AES-GCM (length: %u bytes)\n", log_new.ct_sym.ct_len);
+    
+    // Save encrypted log object
+    char filename[512];
+    snprintf(filename, sizeof(filename), "out_revocation/encrypted/ctobj_revocation_test.bin");
+    FILE *fp = fopen(filename, "wb");
+    if (!fp) {
+        fprintf(stderr, "[ERROR] Cannot open file %s for writing\n", filename);
+        free(log_new.ct_sym.ciphertext);
+        return 8;
+    }
+    
+    // Write metadata
+    fwrite(&log_new.metadata, sizeof(LogMetadata), 1, fp);
+    
+    // Write symmetric ciphertext
+    fwrite(&log_new.ct_sym.ct_len, sizeof(uint32_t), 1, fp);
+    fwrite(log_new.ct_sym.ciphertext, log_new.ct_sym.ct_len, 1, fp);
+    fwrite(log_new.ct_sym.nonce, AES_NONCE_SIZE, 1, fp);
+    fwrite(log_new.ct_sym.tag, AES_TAG_SIZE, 1, fp);
+    
+    // Write ABE ciphertext
+    fwrite(log_new.ct_abe.policy.expression, MAX_POLICY_SIZE, 1, fp);
+    fwrite(&log_new.ct_abe.n_components, sizeof(uint32_t), 1, fp);
+    
+    // Write C0 (m x n matrix in CRT domain)
+    size_t c0_size = PARAM_M * PARAM_N;
+    fwrite(log_new.ct_abe.C0, sizeof(scalar), c0_size, fp);
+    
+    // Write each C[i] component
+    for (uint32_t i = 0; i < log_new.ct_abe.n_components; i++) {
+        if (!log_new.ct_abe.C || !log_new.ct_abe.C[i]) {
+            fprintf(stderr, "[ERROR] C[%u] is NULL\n", i);
+            fclose(fp);
+            free(log_new.ct_sym.ciphertext);
+            return 8;
+        }
+        fwrite(log_new.ct_abe.C[i], sizeof(scalar), c0_size, fp);
+    }
+    
+    // Write ct_key (the encapsulated K_log)
+    fwrite(log_new.ct_abe.ct_key, sizeof(scalar), PARAM_N, fp);
+    
+    // Write rho (attribute mapping)
+    if (log_new.ct_abe.policy.rho && log_new.ct_abe.policy.matrix_rows > 0) {
+        fwrite(&log_new.ct_abe.policy.matrix_rows, sizeof(uint32_t), 1, fp);
+        fwrite(log_new.ct_abe.policy.rho, sizeof(uint32_t), log_new.ct_abe.policy.matrix_rows, fp);
+    } else {
+        uint32_t zero = 0;
+        fwrite(&zero, sizeof(uint32_t), 1, fp);
+    }
+    
+    fclose(fp);
+    printf("  Saved new ciphertext to %s\n", filename);
+    printf("Encryption successful\n\n");
+    
+    // ========================================================================
+    // Step 6b: Decrypt new ciphertext with new key
+    // ========================================================================
+    printf("Decrypting new ciphertext with new key\n");
+    
+    // Create decrypted output directory
+#ifdef _WIN32
+    _mkdir("out_revocation/decrypted");
+#else
+    mkdir("out_revocation/decrypted", 0755);
+#endif
+    
+    // Decrypt the saved ciphertext
+    printf("  Loading encrypted log from %s...\n", filename);
+    EncryptedLogObject log_loaded;
+    if (load_ctobj_file(filename, &log_loaded) != 0) {
+        fprintf(stderr, "[ERROR] Failed to load ciphertext from %s\n", filename);
+        free(log_new.ct_sym.ciphertext);
+        return 8;
+    }
+    printf("  Loaded encrypted log (CT_sym length: %u bytes)\n", log_loaded.ct_sym.ct_len);
+    
+    // Decrypt full log entry (ABE + symmetric)
+    uint8_t *decrypted_log_data = NULL;
+    size_t decrypted_log_len = 0;
+    
+    printf("  Decrypting ABE ciphertext to recover K_log...\n");
+    fflush(stdout);
+    int decrypt_ret = decrypt_log_entry(&log_loaded, &usk_new, &mpk_new, &decrypted_log_data, &decrypted_log_len);
+    if (decrypt_ret != 0) {
+        fprintf(stderr, "[ERROR] Failed to decrypt log entry (return code: %d)\n", decrypt_ret);
+        fprintf(stderr, "[ERROR] This might be due to:\n");
+        fprintf(stderr, "  - ABE decryption failure (policy mismatch?)\n");
+        fprintf(stderr, "  - Symmetric decryption failure (wrong key?)\n");
+        fprintf(stderr, "  - Hash verification failure\n");
+        encrypted_log_free(&log_loaded);
+        free(log_new.ct_sym.ciphertext);
+        return 8;
+    }
+    
+    printf("  Successfully decrypted log entry\n");
+    printf("  Decrypted log length: %zu bytes\n", decrypted_log_len);
+    
+    // Verify decrypted log matches original
+    if (decrypted_log_len != msg_len || memcmp(test_message, decrypted_log_data, msg_len) != 0) {
+        fprintf(stderr, "[ERROR] Decrypted log data mismatch!\n");
+        fprintf(stderr, "  Expected length: %zu, got: %zu\n", msg_len, decrypted_log_len);
+        fprintf(stderr, "  Expected: %s\n", test_message);
+        fprintf(stderr, "  Got: ");
+        fwrite(decrypted_log_data, 1, decrypted_log_len < 200 ? decrypted_log_len : 200, stderr);
+        fprintf(stderr, "\n");
+        free(decrypted_log_data);
+        encrypted_log_free(&log_loaded);
+        free(log_new.ct_sym.ciphertext);
+        return 8;
+    }
+    
+    printf("  Decrypted log data matches original\n");
+    
+    // Save decrypted result (as JSON for consistency with other tests)
+    char decrypted_filename[512];
+    snprintf(decrypted_filename, sizeof(decrypted_filename), "out_revocation/decrypted/decrypted_revocation_test.json");
+    printf("  Saving decrypted result to %s...\n", decrypted_filename);
+    fflush(stdout);
+    
+    FILE *fp_dec = fopen(decrypted_filename, "w");
+    if (!fp_dec) {
+        fprintf(stderr, "[ERROR] Failed to open file %s for writing (errno: %d)\n", decrypted_filename, errno);
+        free(decrypted_log_data);
+        encrypted_log_free(&log_loaded);
+        free(log_new.ct_sym.ciphertext);
+        return 8;
+    }
+    
+    fprintf(fp_dec, "{\n");
+    fprintf(fp_dec, "  \"timestamp\": \"%s\",\n", log_loaded.metadata.timestamp);
+    fprintf(fp_dec, "  \"user_id\": \"%s\",\n", log_loaded.metadata.user_id);
+    fprintf(fp_dec, "  \"user_role\": \"%s\",\n", log_loaded.metadata.user_role);
+    fprintf(fp_dec, "  \"team\": \"%s\",\n", log_loaded.metadata.team);
+    fprintf(fp_dec, "  \"action_type\": \"%s\",\n", log_loaded.metadata.action_type);
+    fprintf(fp_dec, "  \"resource_id\": \"%s\",\n", log_loaded.metadata.resource_id);
+    fprintf(fp_dec, "  \"decrypted_log_data\": \"");
+    // Escape JSON string
+    for (size_t i = 0; i < decrypted_log_len; i++) {
+        if (decrypted_log_data[i] == '"' || decrypted_log_data[i] == '\\') {
+            fprintf(fp_dec, "\\");
+        }
+        if (decrypted_log_data[i] >= 32 && decrypted_log_data[i] < 127) {
+            fprintf(fp_dec, "%c", decrypted_log_data[i]);
+        } else {
+            fprintf(fp_dec, "\\u%04x", (unsigned char)decrypted_log_data[i]);
+        }
+    }
+    fprintf(fp_dec, "\"\n");
+    fprintf(fp_dec, "}\n");
+    fclose(fp_dec);
+    printf("  Saved decrypted result to %s\n", decrypted_filename);
+    
+    free(decrypted_log_data);
+    
+    encrypted_log_free(&log_loaded);
+    // Note: Don't free log_new.ct_abe components - they're shared with ct_new_final
+    // Only free the symmetric ciphertext we allocated
+    free(log_new.ct_sym.ciphertext);
+    printf("Decryption successful\n\n");
     
     // ========================================================================
     // Step 7: Verify Forward Security
     // ========================================================================
-    printf("[STEP 7] Verifying Forward Security\n");
+    printf("Verifying Forward Security\n");
     
     // Load old SK (admin + storage-team)
     UserSecretKey usk_old;
@@ -209,10 +410,10 @@ int main(void) {
             fprintf(stderr, "[ERROR] SECURITY BREACH: Old key decrypts new ciphertext!\n");
             return 11;
         } else {
-            printf("    ✓ Old key fails to correctly decrypt new ciphertext (expected)\n");
+            printf("    Old key fails to correctly decrypt new ciphertext (expected)\n");
         }
     } else {
-        printf("    ✓ Old key correctly fails to decrypt new ciphertext\n");
+        printf("    Old key correctly fails to decrypt new ciphertext\n");
     }
     
     // Test 7b: New SK (admin only) CAN decrypt CT_new
@@ -232,17 +433,16 @@ int main(void) {
         printf("\n");
         return 13;
     }
-    printf("    ✓ New key correctly decrypts new ciphertext\n");
-    printf("[STEP 7] ✓ Forward security verified\n\n");
+    printf("    New key correctly decrypts new ciphertext\n");
+    printf("Forward security verified\n\n");
     
     // ========================================================================
     // Step 8: Test Re-Encryption
     // ========================================================================
-    printf("[STEP 8] Testing Re-Encryption\n");
+    printf("Testing Re-Encryption\n");
     
     // First, we need to create an old ciphertext to re-encrypt
     // Encrypt with old policy and old MPK
-    printf("  Creating old ciphertext with old policy...\n");
     ABECiphertext ct_old;
     poly_matrix s_shared_old = NULL;
     uint8_t k_log_old[AES_KEY_SIZE];
@@ -273,7 +473,7 @@ int main(void) {
         fprintf(stderr, "[ERROR] K_log recovery mismatch\n");
         return 17;
     }
-    printf("  ✓ Recovered K_log from old ciphertext\n");
+    printf("  Recovered K_log from old ciphertext\n");
     
     // Re-encrypt K_log with new policy and new MPK
     printf("  Re-encrypting K_log with new policy and MPK...\n");
@@ -287,7 +487,7 @@ int main(void) {
         fprintf(stderr, "[ERROR] Re-encryption failed\n");
         return 18;
     }
-    printf("  ✓ Re-encrypted ciphertext created\n");
+    printf("  Re-encrypted ciphertext created\n");
     
     // Verify new SK can decrypt re-encrypted ciphertext
     printf("  Verifying new SK can decrypt re-encrypted ciphertext...\n");
@@ -301,8 +501,8 @@ int main(void) {
         fprintf(stderr, "[ERROR] Re-encrypted decrypt mismatch\n");
         return 20;
     }
-    printf("  ✓ Re-encrypted ciphertext decrypts correctly with new key\n");
-    printf("[STEP 8] ✓ Re-encryption successful\n\n");
+    printf("  Re-encrypted ciphertext decrypts correctly with new key\n");
+    printf("Re-encryption successful\n\n");
     
     // ========================================================================
     // Summary
@@ -310,11 +510,11 @@ int main(void) {
     printf("========================================\n");
     printf("REVOCATION TEST SUMMARY\n");
     printf("========================================\n");
-    printf("✓ Phase 1: Policy Update - SUCCESS\n");
-    printf("✓ Phase 2: Trapdoor Rotation - SUCCESS\n");
-    printf("✓ Phase 3: Key Regeneration - SUCCESS\n");
-    printf("✓ Phase 4: Re-Encryption - SUCCESS\n");
-    printf("✓ Forward Security Verified\n");
+    printf("Phase 1: Policy Update - SUCCESS\n");
+    printf("Phase 2: Trapdoor Rotation - SUCCESS\n");
+    printf("Phase 3: Key Regeneration - SUCCESS\n");
+    printf("Phase 4: Re-Encryption - SUCCESS\n");
+    printf("Forward Security Verified\n");
     printf("\nAll revocation tests passed!\n");
     printf("\nNew keys saved to keys_revocation/:\n");
     printf("  - MPK_new.bin\n");

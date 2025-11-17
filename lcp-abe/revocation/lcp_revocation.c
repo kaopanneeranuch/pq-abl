@@ -85,17 +85,9 @@ int lcp_update_policy_exclude_attrs(const AccessPolicy *policy_old,
                                     const uint32_t *revoked_attr_indices,
                                     uint32_t n_revoked,
                                     AccessPolicy *policy_new) {
-    fprintf(stderr, "[Revocation DEBUG] Updating policy: excluding %u revoked attributes\n", n_revoked);
-    fflush(stderr);
     
     // Initialize new policy
     policy_init(policy_new);
-    
-    // Copy expression (we'll need to rebuild it)
-    strncpy(policy_new->expression, policy_old->expression, MAX_POLICY_SIZE - 1);
-    policy_new->expression[MAX_POLICY_SIZE - 1] = '\0';
-    fprintf(stderr, "[Revocation DEBUG] Copied policy expression\n");
-    fflush(stderr);
     
     // Build new attribute list excluding revoked attributes
     bool *is_revoked = (bool *)calloc(policy_old->attr_count, sizeof(bool));
@@ -105,22 +97,16 @@ int lcp_update_policy_exclude_attrs(const AccessPolicy *policy_old,
     }
     
     // Mark revoked attributes
-    fprintf(stderr, "[Revocation DEBUG] Marking revoked attributes...\n");
-    fflush(stderr);
     for (uint32_t i = 0; i < n_revoked; i++) {
         for (uint32_t j = 0; j < policy_old->attr_count; j++) {
             if (policy_old->attr_indices[j] == revoked_attr_indices[i]) {
                 is_revoked[j] = true;
-                fprintf(stderr, "[Revocation DEBUG] Marked attribute index %u as revoked\n", j);
-                fflush(stderr);
                 break;
             }
         }
     }
     
     // Copy non-revoked attributes
-    fprintf(stderr, "[Revocation DEBUG] Copying non-revoked attributes...\n");
-    fflush(stderr);
     for (uint32_t i = 0; i < policy_old->attr_count; i++) {
         if (!is_revoked[i]) {
             if (policy_new->attr_count < MAX_ATTRIBUTES) {
@@ -129,9 +115,87 @@ int lcp_update_policy_exclude_attrs(const AccessPolicy *policy_old,
             }
         }
     }
-    fprintf(stderr, "[Revocation DEBUG] New policy has %u attributes (was %u)\n", 
-            policy_new->attr_count, policy_old->attr_count);
-    fflush(stderr);
+    // Rebuild expression string by parsing old expression and excluding revoked attributes
+    // Parse the old expression to extract attribute names
+    const char *expr = policy_old->expression;
+    
+    char attr_buffer[ATTRIBUTE_NAME_LEN];
+    char new_expr[MAX_POLICY_SIZE] = "";
+    bool first_attr = true;
+    
+    // Simple parser: extract attributes from expression (handles "(attr1 AND attr2)" format)
+    size_t expr_len = strlen(expr);
+    
+    for (size_t i = 0; i < expr_len; i++) {
+        // Skip whitespace and parentheses
+        if (expr[i] == ' ' || expr[i] == '(' || expr[i] == ')') {
+            continue;
+        }
+        
+        // Check if we hit "AND" keyword (case-insensitive check)
+        if ((i + 2 < expr_len) && 
+            (expr[i] == 'A' || expr[i] == 'a') &&
+            (expr[i+1] == 'N' || expr[i+1] == 'n') &&
+            (expr[i+2] == 'D' || expr[i+2] == 'd') &&
+            (i + 3 >= expr_len || expr[i+3] == ' ' || expr[i+3] == ')' || expr[i+3] == '\0')) {
+            i += 2; // Skip "AND" (loop will increment past 'D')
+            continue;
+        }
+        
+        // Extract attribute name (until space, ')', or start of "AND")
+        size_t attr_start = i;
+        
+        while (i < expr_len && expr[i] != ' ' && expr[i] != ')' && expr[i] != '(') {
+            // Check if we're hitting "AND"
+            if ((i + 2 < expr_len) && 
+                (expr[i] == 'A' || expr[i] == 'a') &&
+                (expr[i+1] == 'N' || expr[i+1] == 'n') &&
+                (expr[i+2] == 'D' || expr[i+2] == 'd') &&
+                (i + 3 >= expr_len || expr[i+3] == ' ' || expr[i+3] == ')' || expr[i+3] == '\0')) {
+                break;
+            }
+            i++;
+        }
+        
+        size_t attr_len = i - attr_start;
+        
+        if (attr_len > 0 && attr_len < ATTRIBUTE_NAME_LEN) {
+            strncpy(attr_buffer, &expr[attr_start], attr_len);
+            attr_buffer[attr_len] = '\0';
+            
+            // Check if this attribute is revoked
+            uint32_t attr_idx = attr_name_to_index(attr_buffer);
+            
+            bool is_this_revoked = false;
+            for (uint32_t j = 0; j < n_revoked; j++) {
+                if (attr_idx == revoked_attr_indices[j]) {
+                    is_this_revoked = true;
+                    break;
+                }
+            }
+            
+            // Add to new expression if not revoked
+            if (!is_this_revoked) {
+                if (!first_attr) {
+                    size_t current_len = strlen(new_expr);
+                    if (current_len + 5 < MAX_POLICY_SIZE) {
+                        strncat(new_expr, " AND ", MAX_POLICY_SIZE - current_len - 1);
+                    }
+                }
+                size_t current_len = strlen(new_expr);
+                if (current_len + attr_len < MAX_POLICY_SIZE) {
+                    strncat(new_expr, attr_buffer, MAX_POLICY_SIZE - current_len - 1);
+                }
+                first_attr = false;
+            }
+        }
+        
+        if (i >= expr_len) break;
+    }
+    
+    // Copy rebuilt expression
+    strncpy(policy_new->expression, new_expr, MAX_POLICY_SIZE - 1);
+    policy_new->expression[MAX_POLICY_SIZE - 1] = '\0';
     
     free(is_revoked);
     
@@ -145,22 +209,15 @@ int lcp_update_policy_exclude_attrs(const AccessPolicy *policy_old,
         policy_new->threshold = policy_new->attr_count;
         
         // Rebuild LSSS matrix
-        fprintf(stderr, "[Revocation DEBUG] Rebuilding LSSS matrix...\n");
-        fflush(stderr);
         if (lsss_policy_to_matrix(policy_new) != 0) {
             fprintf(stderr, "[Revocation] WARNING: Failed to rebuild LSSS matrix\n");
             // Continue anyway - the matrix might be rebuilt later
-        } else {
-            fprintf(stderr, "[Revocation DEBUG] LSSS matrix rebuilt successfully\n");
-            fflush(stderr);
         }
     } else {
         fprintf(stderr, "[Revocation] ERROR: All attributes revoked, policy becomes empty\n");
         return -1;
     }
     
-    fprintf(stderr, "[Revocation DEBUG] Policy update complete\n");
-    fflush(stderr);
     return 0;
 }
 
@@ -170,20 +227,12 @@ int lcp_update_policy_exclude_attrs(const AccessPolicy *policy_old,
 
 int lcp_rotate_trapdoor(const MasterSecretKey *msk_old,
                        MasterSecretKey *msk_new) {
-    fprintf(stderr, "[Revocation DEBUG] Starting trapdoor rotation...\n");
-    fflush(stderr);
-    
     // Initialize new MSK
     msk_init(msk_new);
-    fprintf(stderr, "[Revocation DEBUG] MSK initialized\n");
-    fflush(stderr);
     
     // FIXED APPROACH: Sample a completely new trapdoor from scratch
     // This ensures all trapdoor properties are maintained (shortness, valid structure)
     // This is the same approach as in lcp_setup, which guarantees a valid trapdoor
-    
-    fprintf(stderr, "[Revocation DEBUG] Sampling new trapdoor from discrete Gaussian (same as setup)...\n");
-    fflush(stderr);
     
     // Sample new trapdoor T' from discrete Gaussian D_{R^{2d,dk}, σ_s}
     // This is exactly how the original trapdoor is generated in setup
@@ -192,31 +241,19 @@ int lcp_rotate_trapdoor(const MasterSecretKey *msk_old,
                            2 * PARAM_D, 
                            PARAM_D * PARAM_K, 
                            PARAM_SIGMA);
-    fprintf(stderr, "[Revocation DEBUG] New trapdoor sampled\n");
-    fflush(stderr);
     
     // Reconstruct complex representation for new trapdoor
     // CRITICAL: This must be done with T in signed coefficient representation (as sampled)
     // This matches setup.c: construct_complex_private_key is called before converting to positive
-    fprintf(stderr, "[Revocation DEBUG] Reconstructing complex representation (this may take a moment)...\n");
-    fflush(stderr);
     construct_complex_private_key(msk_new->cplx_T, msk_new->sch_comp, msk_new->T);
-    fprintf(stderr, "[Revocation DEBUG] Complex representation complete\n");
-    fflush(stderr);
     
     // Convert T to positive representation [0, q-1] (matching setup.c behavior)
-    fprintf(stderr, "[Revocation DEBUG] Converting T to positive representation...\n");
-    fflush(stderr);
     size_t t_size = 2 * PARAM_D * PARAM_D * PARAM_K * PARAM_N;
     for (size_t i = 0; i < t_size; i++) {
         msk_new->T[i] += PARAM_Q;
     }
-    fprintf(stderr, "[Revocation DEBUG] T converted to positive\n");
-    fflush(stderr);
     
     // Convert T to CRT representation (needed for other operations)
-    fprintf(stderr, "[Revocation DEBUG] Converting T to CRT representation...\n");
-    fflush(stderr);
     matrix_crt_representation(msk_new->T, 2 * PARAM_D, PARAM_D * PARAM_K, LOG_R);
     
     // Validate Schur complement after reconstruction
@@ -239,10 +276,6 @@ int lcp_rotate_trapdoor(const MasterSecretKey *msk_old,
         return -1;  // Abort if we have invalid values
     }
     
-    fprintf(stderr, "[Revocation DEBUG] sch_comp validation passed\n");
-    fflush(stderr);
-    fprintf(stderr, "[Revocation DEBUG] Trapdoor rotation complete\n");
-    fflush(stderr);
     return 0;
 }
 
@@ -252,8 +285,6 @@ int lcp_rotate_trapdoor(const MasterSecretKey *msk_old,
 // This matches the setup procedure to ensure consistency
 int lcp_regenerate_A_from_trapdoor(const MasterSecretKey *msk_new,
                                    MasterPublicKey *mpk_new) {
-    fprintf(stderr, "[Revocation DEBUG] Regenerating A matrix from new trapdoor...\n");
-    fflush(stderr);
     
     // Allocate temporary matrices for A construction
     scalar *A_hat_coeffs = (scalar *)malloc(PARAM_D * PARAM_D * PARAM_N * sizeof(scalar));
@@ -306,8 +337,6 @@ int lcp_regenerate_A_from_trapdoor(const MasterSecretKey *msk_new,
     free(A_hat_coeffs);
     free(AprimeT_coeffs);
     
-    fprintf(stderr, "[Revocation DEBUG] A matrix regenerated successfully\n");
-    fflush(stderr);
     return 0;
 }
 
@@ -342,26 +371,12 @@ int lcp_regenerate_user_key(const MasterPublicKey *mpk,
                             const MasterSecretKey *msk_new,
                             const AttributeSet *attr_set,
                             UserSecretKey *usk_new) {
-    fprintf(stderr, "[Revocation DEBUG] Regenerating key for user with %u attributes...\n", 
-            attr_set->count);
-    fflush(stderr);
-    
     // Check if user has revoked attributes
     // (This check should be done before calling this function, but we include it for safety)
     
     // Simply call the existing keygen function with the new MSK
     // This will generate a new key under the rotated trapdoor
-    int ret = lcp_keygen(mpk, msk_new, attr_set, usk_new);
-    
-    if (ret == 0) {
-        fprintf(stderr, "[Revocation DEBUG] Key regeneration successful\n");
-        fflush(stderr);
-    } else {
-        fprintf(stderr, "[Revocation DEBUG] Key regeneration failed\n");
-        fflush(stderr);
-    }
-    
-    return ret;
+    return lcp_keygen(mpk, msk_new, attr_set, usk_new);
 }
 
 // ============================================================================
@@ -480,12 +495,7 @@ int lcp_execute_revocation(const char **revoked_attr_names,
                           RevocationContext *ctx) {
     int ret = 0;
     
-    fprintf(stderr, "[Revocation DEBUG] ===== Starting revocation execution =====\n");
-    fflush(stderr);
-    
     // Step 1: Update policy to exclude revoked attributes
-    fprintf(stderr, "[Revocation DEBUG] Step 1: Converting attribute names to indices...\n");
-    fflush(stderr);
     uint32_t *revoked_indices = (uint32_t *)calloc(n_revoked_attrs, sizeof(uint32_t));
     if (!revoked_indices) {
         fprintf(stderr, "[Revocation] ERROR: Failed to allocate revoked_indices\n");
@@ -494,38 +504,25 @@ int lcp_execute_revocation(const char **revoked_attr_names,
     
     for (uint32_t i = 0; i < n_revoked_attrs; i++) {
         revoked_indices[i] = attr_name_to_index(revoked_attr_names[i]);
-        fprintf(stderr, "[Revocation DEBUG]   '%s' -> index %u\n", 
-                revoked_attr_names[i], revoked_indices[i]);
-        fflush(stderr);
     }
     
-    fprintf(stderr, "[Revocation DEBUG] Step 1: Updating policy...\n");
-    fflush(stderr);
     if (lcp_update_policy_exclude_attrs(policy_old, revoked_indices, 
                                        n_revoked_attrs, policy_new) != 0) {
         fprintf(stderr, "[Revocation] ERROR: Failed to update policy\n");
         free(revoked_indices);
         return -1;
     }
-    fprintf(stderr, "[Revocation DEBUG] Step 1: Policy updated\n");
-    fflush(stderr);
     
     // Step 2: Rotate trapdoor
-    fprintf(stderr, "[Revocation DEBUG] Step 2: Rotating trapdoor...\n");
-    fflush(stderr);
     if (lcp_rotate_trapdoor(msk_old, msk_new) != 0) {
         fprintf(stderr, "[Revocation] ERROR: Failed to rotate trapdoor\n");
         free(revoked_indices);
         return -1;
     }
-    fprintf(stderr, "[Revocation DEBUG] Step 2: Trapdoor rotated\n");
-    fflush(stderr);
     
     // Step 3: Update MPK
     // CRITICAL: After rotating trapdoor, we must regenerate A from new T
     // to maintain the trapdoor relationship A·T ≈ β
-    fprintf(stderr, "[Revocation DEBUG] Step 3: Updating MPK...\n");
-    fflush(stderr);
     mpk_init(mpk_new, mpk_old->n_attributes);
     
     // Regenerate A matrix from new trapdoor (CRITICAL for trapdoor relationship)
@@ -546,12 +543,8 @@ int lcp_execute_revocation(const char **revoked_attr_names,
     mpk_new->k = mpk_old->k;
     mpk_new->m = mpk_old->m;
     mpk_new->n_attributes = mpk_old->n_attributes;
-    fprintf(stderr, "[Revocation DEBUG] Step 3: MPK updated (A regenerated from new T)\n");
-    fflush(stderr);
     
     // Update revocation context
-    fprintf(stderr, "[Revocation DEBUG] Step 4: Updating revocation context...\n");
-    fflush(stderr);
     ctx->current_ver_id++;
     if (ctx->revoked_attr_indices) {
         // Append new revoked attributes
@@ -569,16 +562,11 @@ int lcp_execute_revocation(const char **revoked_attr_names,
         revoked_indices = NULL;  // Don't free, it's now owned by ctx
     }
     ctx->trapdoor_rotated = true;
-    fprintf(stderr, "[Revocation DEBUG] Step 4: Context updated (ver_id=%u, n_revoked=%u)\n",
-            ctx->current_ver_id, ctx->n_revoked_attrs);
-    fflush(stderr);
     
     if (revoked_indices) {
         free(revoked_indices);
     }
     
-    fprintf(stderr, "[Revocation DEBUG] ===== Revocation execution complete =====\n");
-    fflush(stderr);
     return ret;
 }
 
