@@ -764,7 +764,7 @@ int decrypt_log_symmetric(const SymmetricCiphertext *ct_sym,
     if (result != 0) {
         free(*plaintext_out);
         *plaintext_out = NULL;
-        fprintf(stderr, "[Decrypt AES] Error: AES-GCM decryption or authentication failed\n");
+        // fprintf(stderr, "[Decrypt AES] Error: AES-GCM decryption or authentication failed\n");
         return -1;
     }
     
@@ -1392,8 +1392,8 @@ int decrypt_ctobj_batch(const char **filenames,
                                                &log_data, &log_len);
         
         if (sym_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u/%u: %s\n", 
-                i + 1, n_files, filenames[i]);
+            // fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u/%u: %s\n", 
+            //     i + 1, n_files, filenames[i]);
             encrypted_log_free(&log);
             continue;
         }
@@ -1463,8 +1463,8 @@ int decrypt_ctobj_batch(const char **filenames,
     if (success_count == 0) {
         fprintf(stderr, "Decryption failed: No files successfully decrypted\n");
     } else {
-        fprintf(stderr, "[Decrypt] Success: %u/%u files decrypted, %u ABE decryptions, %u cache hits (%.1f%%)\n",
-            success_count, n_files, abe_decryptions, cache_hits,
+        fprintf(stderr, "[Decrypt] Success: %u ABE decryptions, %u cache hits (%.1f%%)\n",
+            abe_decryptions, cache_hits,
             n_files > 0 ? (100.0 * cache_hits / n_files) : 0.0);
     }
     
