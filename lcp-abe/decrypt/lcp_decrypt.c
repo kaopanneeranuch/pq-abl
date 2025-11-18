@@ -14,6 +14,13 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
                     const UserSecretKey *usk,
                     const MasterPublicKey *mpk,
                     uint8_t key_out[AES_KEY_SIZE]) {
+    // Validate policy structure is properly initialized
+    if (!ct_abe->policy.share_matrix || !ct_abe->policy.rho || ct_abe->policy.matrix_rows == 0) {
+        fprintf(stderr, "[Decrypt] Error: Policy structure not properly initialized (matrix=%p, rho=%p, rows=%u)\n",
+            (void*)ct_abe->policy.share_matrix, (void*)ct_abe->policy.rho, ct_abe->policy.matrix_rows);
+        return -1;
+    }
+    
     // Check if user attributes satisfy policy
     if (!lsss_check_satisfaction(&ct_abe->policy, &usk->attr_set)) {
         fprintf(stderr, "[Decrypt] Error: User attributes do not satisfy policy\n");
@@ -23,7 +30,10 @@ int lcp_abe_decrypt(const ABECiphertext *ct_abe,
     // Compute reconstruction coefficients
     scalar coefficients[MAX_ATTRIBUTES];
     uint32_t n_coeffs = 0;
-    lsss_compute_coefficients(&ct_abe->policy, &usk->attr_set, coefficients, &n_coeffs);
+    if (lsss_compute_coefficients(&ct_abe->policy, &usk->attr_set, coefficients, &n_coeffs) != 0) {
+        fprintf(stderr, "[Decrypt] Error: Failed to compute coefficients (policy satisfied but coefficient computation failed)\n");
+        return -1;
+    }
 
     if (getenv("ARITH_DEBUG")) {
         poly_matrix y = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
@@ -1047,6 +1057,8 @@ typedef struct {
     int policy_satisfied;
     scalar coefficients[MAX_ATTRIBUTES];
     uint32_t n_coeffs;
+    uint32_t matrix_rows;  // Cached policy matrix_rows for validation
+    uint32_t rho[MAX_ATTRIBUTES];  // Cached rho mapping for validation
     poly_matrix A_omega_A;  // Cached expensive multiply_by_A result
 } PolicyDecryptCache;
 
@@ -1109,7 +1121,12 @@ static int lcp_abe_decrypt_cached(const ABECiphertext *ct_abe,
     free(prod_reduced);
     
     // Step 2: Compute policy attribute contributions using cached coefficients
-    for (uint32_t i = 0; i < cache->n_coeffs && i < ct_abe->policy.matrix_rows; i++) {
+    // IMPORTANT: Use current file's policy.matrix_rows, but cached coefficients
+    // The coefficients are indexed by policy matrix row, so they should align
+    // Match original loop: i < n_coeffs && i < matrix_rows
+    uint32_t max_iter = (cache->n_coeffs < ct_abe->policy.matrix_rows) ?
+                        cache->n_coeffs : ct_abe->policy.matrix_rows;
+    for (uint32_t i = 0; i < max_iter; i++) {
         if (cache->coefficients[i] == 0) continue;
         
         uint32_t policy_attr_idx = ct_abe->policy.rho[i];
@@ -1123,6 +1140,10 @@ static int lcp_abe_decrypt_cached(const ABECiphertext *ct_abe,
         }
         
         if (omega_idx == -1) {
+            // Match original behavior: if coefficient is 0, skip; otherwise it's an error
+            // But we already checked coefficients[i] == 0 above, so if we're here, it's an error
+            fprintf(stderr, "[Decrypt] ERROR: Policy requires attr %u but user doesn't have it! (row %u)\n",
+                    policy_attr_idx, i);
             free(decryption_term_crt);
             free(decryption_term_coeff);
             free(recovered);
@@ -1279,6 +1300,8 @@ int decrypt_ctobj_batch(const char **filenames,
         for (uint32_t j = 0; j < n_cached_policies; j++) {
             if (policy_cache[j].valid && 
                 strcmp(policy_cache[j].policy, log.ct_abe.policy.expression) == 0) {
+                // For same policy expression, we can reuse A_omega_A (policy-independent)
+                // Coefficients will be computed fresh for each file
                 cache = &policy_cache[j];
                 cache_idx = j;
                 cache_hits++;
@@ -1286,8 +1309,12 @@ int decrypt_ctobj_batch(const char **filenames,
             }
         }
         
+        // Track if this is a cache miss (need to populate cache)
+        int is_cache_miss = 0;
+        
         // If cache miss, populate cache with expensive computations
         if (!cache && n_cached_policies < 10) {
+            is_cache_miss = 1;
             cache = &policy_cache[n_cached_policies];
             cache_idx = n_cached_policies;
             n_cached_policies++;
@@ -1311,6 +1338,12 @@ int decrypt_ctobj_batch(const char **filenames,
             lsss_compute_coefficients(&log.ct_abe.policy, &usk->attr_set, 
                                      cache->coefficients, &cache->n_coeffs);
             
+            // Cache policy structure for validation (matrix_rows and rho)
+            cache->matrix_rows = log.ct_abe.policy.matrix_rows;
+            if (log.ct_abe.policy.rho && cache->matrix_rows > 0 && cache->matrix_rows <= MAX_ATTRIBUTES) {
+                memcpy(cache->rho, log.ct_abe.policy.rho, cache->matrix_rows * sizeof(uint32_t));
+            }
+            
             // Compute A_omega_A (expensive, cacheable)
             cache->A_omega_A = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
             if (!cache->A_omega_A) {
@@ -1327,17 +1360,37 @@ int decrypt_ctobj_batch(const char **filenames,
         
         uint8_t k_log[AES_KEY_SIZE];
         int decrypt_result;
+        int used_cached = 0;
         
-        // Use cached decryption if available, otherwise fall back to standard
-        if (cache && cache->valid) {
+        // Use cached decryption if available AND not a cache miss
+        // For cache miss, use standard decryption to ensure correctness, then cache can be used for subsequent files
+        if (cache && cache->valid && !is_cache_miss) {
             decrypt_result = lcp_abe_decrypt_cached(&log.ct_abe, usk, mpk, cache, k_log);
+            used_cached = 1;
+            
+            // If cached decryption fails, fall back to standard decryption
+            if (decrypt_result != 0) {
+                fprintf(stderr, "[Decrypt] Warning: Cached decryption failed for file %u, falling back to standard\n", i + 1);
+                decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
+                used_cached = 0;
+            }
         } else {
-            // Fallback to standard decryption (no cache)
+            // Use standard decryption (for cache miss or no cache)
             decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
         }
         
+        // Debug: Track which method was used for files that will fail
+        // This helps identify if the issue is with cached or standard decryption
+        if (decrypt_result == 0) {
+            // Check if AES-GCM will fail (we can't know yet, but we can track the method)
+            // We'll add this info to the AES-GCM error message instead
+        }
+        
         if (decrypt_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: Decryption error for file %u\n", i + 1);
+            fprintf(stderr, "[Decrypt] FAILED: ABE decryption error for file %u/%u: %s (policy: %s, method: %s)\n", 
+                i + 1, n_files, filenames[i],
+                log.ct_abe.policy.expression,
+                used_cached ? "cached->standard" : "standard");
             encrypted_log_free(&log);
             continue;
         }
@@ -1351,13 +1404,35 @@ int decrypt_ctobj_batch(const char **filenames,
                                                &log_data, &log_len);
         
         if (sym_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u (policy: %s)\n", 
-                i + 1, log.ct_abe.policy.expression);
+            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u/%u: %s (policy: %s, method: %s)\n", 
+                i + 1, n_files, filenames[i], log.ct_abe.policy.expression,
+                used_cached ? "cached" : "standard");
             // Debug: print first few bytes of key to verify it's not all zeros
-            fprintf(stderr, "[Decrypt] Debug: k_log[0:4] = %02x %02x %02x %02x\n",
-                k_log[0], k_log[1], k_log[2], k_log[3]);
-            encrypted_log_free(&log);
-            continue;
+            fprintf(stderr, "[Decrypt] Debug: k_log[0:8] = %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                k_log[0], k_log[1], k_log[2], k_log[3], k_log[4], k_log[5], k_log[6], k_log[7]);
+            // Check if key is all zeros (would indicate extraction failure)
+            int all_zeros = 1;
+            for (int z = 0; z < AES_KEY_SIZE; z++) {
+                if (k_log[z] != 0) {
+                    all_zeros = 0;
+                    break;
+                }
+            }
+            if (all_zeros) {
+                fprintf(stderr, "[Decrypt] Debug: WARNING - Extracted key is all zeros!\n");
+            }
+            // Log additional debug info for failed files
+            fprintf(stderr, "[Decrypt] Debug: Failed file details - n_components=%u, matrix_rows=%u, policy='%s'\n",
+                log.ct_abe.n_components, log.ct_abe.policy.matrix_rows, log.ct_abe.policy.expression);
+            if (log.ct_abe.policy.rho) {
+                fprintf(stderr, "[Decrypt] Debug: rho=[%u,%u]\n",
+                    log.ct_abe.policy.rho[0],
+                    log.ct_abe.policy.matrix_rows > 1 ? log.ct_abe.policy.rho[1] : 0);
+            }
+            if (sym_result != 0) {
+                encrypted_log_free(&log);
+                continue;
+            }
         }
         
         if (output_dir) {
