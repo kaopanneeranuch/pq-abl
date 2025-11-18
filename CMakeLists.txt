@@ -21,6 +21,15 @@ if(USE_OPENSSL)
     add_definitions(-DUSE_OPENSSL)
 endif()
 
+# Option to use OpenMP for parallelization
+find_package(OpenMP)
+if(OpenMP_C_FOUND)
+    message(STATUS "OpenMP found: ${OpenMP_C_VERSION}")
+    add_definitions(-DUSE_OPENMP)
+else()
+    message(STATUS "OpenMP not found - parallelization disabled")
+endif()
+
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}
@@ -69,10 +78,31 @@ if(NOT MSVC)
     target_link_libraries(module_bfrs m)
 endif()
 
+# Link Windows cryptography library for CryptGenRandom on Windows
+if(WIN32)
+    target_link_libraries(module_bfrs advapi32)
+endif()
+
 ## Enable AES intrinsics when using GCC/Clang on x86_64 so <wmmintrin.h> inlines work
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
-    # -maes enables AES-NI intrinsics; add privately to this target
-    target_compile_options(module_bfrs PRIVATE -maes)
+    # Only enable -maes on x86_64 architectures (not on ARM)
+    # Check if we're on x86_64 architecture (exclude ARM64/aarch64)
+    set(IS_X86_64 FALSE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i[3-6]86)")
+        if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64|ARM64)")
+            set(IS_X86_64 TRUE)
+        endif()
+    endif()
+    if(CMAKE_SYSTEM_NAME MATCHES "Windows")
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64)")
+            set(IS_X86_64 TRUE)
+        endif()
+    endif()
+    
+    if(IS_X86_64)
+        # -maes enables AES-NI intrinsics; add privately to this target
+        target_compile_options(module_bfrs PRIVATE -maes)
+    endif()
 endif()
 
 # Build LCP-ABE library
@@ -86,6 +116,10 @@ endif()
 
 if(USE_OPENSSL)
     target_link_libraries(lcp_abe OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+if(OpenMP_C_FOUND)
+    target_link_libraries(lcp_abe OpenMP::OpenMP_C)
 endif()
 
 # Test executables (built from lcp-abe/test)

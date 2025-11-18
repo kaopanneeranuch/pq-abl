@@ -2,9 +2,31 @@
 #CC = gcc
 CC = clang
 CFLAGS = -Wall -O3 -mtune=native
-CVECFLAGS := $(CFLAGS) -mavx2 -ftree-vectorize #-fopt-info-vec-optimized
-CFLAGS += -fno-tree-vectorize
 NFL_AVX = -DNFL_OPTIMIZED=ON -DNTT_AVX2
+
+# Detect architecture for conditional flags
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),x86_64)
+    # x86_64: enable AES-NI and AVX2 intrinsics
+    AES_FLAGS = -maes
+    AVX_FLAGS = -mavx2
+else ifeq ($(UNAME_M),i386)
+    # i386: enable AES-NI intrinsics (no AVX2 on 32-bit)
+    AES_FLAGS = -maes
+    AVX_FLAGS =
+else ifeq ($(UNAME_M),i686)
+    # i686: enable AES-NI intrinsics (no AVX2 on 32-bit)
+    AES_FLAGS = -maes
+    AVX_FLAGS =
+else
+    # ARM64 (arm64/aarch64) or other architectures: don't use x86-specific flags
+    # macOS ARM64 uses "arm64", Linux ARM64 uses "aarch64"
+    AES_FLAGS =
+    AVX_FLAGS =
+endif
+
+CVECFLAGS := $(CFLAGS) $(AVX_FLAGS) -ftree-vectorize #-fopt-info-vec-optimized
+CFLAGS += -fno-tree-vectorize
 
 EXEC = signature_tests sampling_tests timing main_signature
 
@@ -34,7 +56,7 @@ sampling.o: sampling.c random.o $(HDR)
 	$(CC) $(CVECFLAGS) -c -o $@ $<
 
 random.o: random.c
-	$(CC) $(CVECFLAGS) -maes -c -o $@ $<
+	$(CC) $(CVECFLAGS) $(AES_FLAGS) -c -o $@ $<
 
 %.o: %.c $(HDR)
 	$(CC) $(CFLAGS) -c -o $@ $<

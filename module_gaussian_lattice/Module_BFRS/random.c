@@ -1,9 +1,53 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <x86intrin.h>
+#include <string.h>
+
+// Platform-specific includes for random number generation
+#if defined(_WIN32) || defined(_WIN64)
+    // Windows
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #include <windows.h>
+    #include <wincrypt.h>
+#else
+    // Unix-like (Linux, macOS, BSD)
+    #include <fcntl.h>
+    #include <unistd.h>
+#endif
+
+// Platform-specific intrinsic headers
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    // x86/x86_64 platforms
+    #if defined(__GNUC__) || defined(__clang__)
+        // GCC/Clang on x86_64: use specific headers for better macOS compatibility
+        #if defined(__APPLE__)
+            #include <emmintrin.h>  // SSE2
+            #include <wmmintrin.h>  // AES-NI intrinsics
+        #else
+            #include <x86intrin.h>  // All x86 intrinsics (Linux/Windows)
+        #endif
+    #elif defined(_MSC_VER)
+        #include <intrin.h>
+        #include <wmmintrin.h>
+    #endif
+    #define USE_AES_NI 1
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    // ARM64: AES intrinsics are not available, will use OpenSSL fallback
+    typedef struct { uint64_t v[2]; } __m128i;
+    #define USE_AES_NI 0
+#else
+    // Unknown platform - disable AES-NI
+    typedef struct { uint64_t v[2]; } __m128i;
+    #define USE_AES_NI 0
+#endif
+
+// OpenSSL fallback for ARM and when AES-NI is not available
+#if !USE_AES_NI && defined(USE_OPENSSL)
+    #include <openssl/aes.h>
+    #include <openssl/rand.h>
+#endif
 
 #include "common.h"
 #include "random.h"
@@ -64,6 +108,10 @@ scalar uniform_mod_q(void)
 	Code from random_aesni.c
 */
 
+// Counter used by all implementations
+static uint64_t ctr = 0;
+
+#if USE_AES_NI
 //macros
 #define DO_ENC_BLOCK(m,k) \
 	do{\
@@ -101,7 +149,6 @@ scalar uniform_mod_q(void)
 
 //the expanded key
 static __m128i key_schedule[20];
-static uint64_t ctr = 0;
 
 static __m128i aes_128_key_expansion(__m128i key, __m128i keygened){
 	keygened = _mm_shuffle_epi32(keygened, _MM_SHUFFLE(3,3,3,3));
@@ -147,20 +194,76 @@ static void aes128_enc(const int8_t * restrict plainText, int8_t * restrict ciph
     _mm_storeu_si128((__m128i *) cipherText, m);
 }
 
+#elif defined(USE_OPENSSL)
+// OpenSSL fallback for ARM and platforms without AES-NI
+static AES_KEY aes_key;
+
+static void aes128_load_key(const int8_t * enc_key) {
+    AES_set_encrypt_key((const unsigned char *)enc_key, 128, &aes_key);
+}
+
+static void aes128_enc(const int8_t * restrict plainText, int8_t * restrict cipherText) {
+    AES_encrypt((const unsigned char *)plainText, (unsigned char *)cipherText, &aes_key);
+}
+
+#else
+// Fallback implementation without AES (using basic operations)
+// This is less secure but ensures compilation on all platforms
+#warning "AES-NI not available and OpenSSL not enabled. Using basic fallback for random number generation."
+static uint8_t seed_key[16] = {0};
+
+static void aes128_load_key(const int8_t * enc_key) {
+    memcpy(seed_key, enc_key, 16);
+}
+
+static void aes128_enc(const int8_t * restrict plainText, int8_t * restrict cipherText) {
+    // Simple XOR-based fallback (not cryptographically secure)
+    for (int i = 0; i < 16; i++) {
+        cipherText[i] = plainText[i] ^ seed_key[i] ^ (uint8_t)(ctr >> (i * 4));
+    }
+    ctr++;
+}
+
+#endif
+
 
 //public API
-void random_bytes_init(void) {	
-	// Open random file
-    int randomData = open("/dev/urandom", O_RDONLY);
-    
-	// Seed the AES key
+void random_bytes_init(void) {
     uint8_t seed[16];
-    read(randomData, seed, sizeof(uint8_t)*16);
+    
+#if defined(_WIN32) || defined(_WIN64)
+    // Windows: Use CryptGenRandom for secure random bytes
+    HCRYPTPROV hCryptProv = 0;
+    if (CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+        if (!CryptGenRandom(hCryptProv, 16, seed)) {
+            // Fallback to insecure method if CryptGenRandom fails
+            for (int i = 0; i < 16; i++) {
+                seed[i] = (uint8_t)(rand() & 0xFF);
+            }
+        }
+        CryptReleaseContext(hCryptProv, 0);
+    } else {
+        // Fallback if CryptAcquireContext fails
+        for (int i = 0; i < 16; i++) {
+            seed[i] = (uint8_t)(rand() & 0xFF);
+        }
+    }
+#else
+    // Unix-like (Linux, macOS, BSD): Use /dev/urandom
+    int randomData = open("/dev/urandom", O_RDONLY);
+    if (randomData >= 0) {
+        read(randomData, seed, sizeof(uint8_t)*16);
+        close(randomData);
+    } else {
+        // Fallback if /dev/urandom fails
+        for (int i = 0; i < 16; i++) {
+            seed[i] = (uint8_t)(rand() & 0xFF);
+        }
+    }
+#endif
+    
     aes128_load_key((int8_t *) seed); // don't know why the AES key is signed but whatever
     ctr = 0;
-    
-    // Don't forget to close the file !!!
-    close(randomData);
 }
 
 void random_bytes(uint8_t * restrict data) {
