@@ -6,12 +6,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef USE_OPENMP
+#include <omp.h>
+#endif
+
 int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
                const AttributeSet *attr_set, UserSecretKey *usk) {
     
     usk_init(usk, attr_set->count);
     usk->attr_set = *attr_set;
     
+    // Parallelize ω_i sampling (independent iterations)
+    #ifdef USE_OPENMP
+    #pragma omp parallel for
+    #endif
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
         
@@ -26,6 +34,83 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
     poly_matrix target = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     poly_matrix sum_term = (poly_matrix)calloc(PARAM_D * PARAM_N, sizeof(scalar));
     
+    // Parallelize B_i^+ · ω_i computation
+    #ifdef USE_OPENMP
+    #pragma omp parallel
+    {
+        // Each thread has its own local sum
+        poly local_sum = (poly)calloc(PARAM_N, sizeof(scalar));
+        if (!local_sum) {
+            #pragma omp critical
+            {
+                fprintf(stderr, "[KeyGen] ERROR: Failed to allocate local_sum\n");
+            }
+        } else {
+            zero_poly(local_sum, PARAM_N - 1);
+            
+            #pragma omp for
+            for (uint32_t i = 0; i < attr_set->count; i++) {
+                const Attribute *attr = &attr_set->attrs[i];
+                
+                if (attr->index >= mpk->n_attributes) {
+                    #pragma omp critical
+                    {
+                        fprintf(stderr, "[KeyGen] ERROR: Invalid attribute index %d (max %d)\n", 
+                                attr->index, mpk->n_attributes - 1);
+                    }
+                    continue;
+                }
+                
+                poly_matrix B_plus_i = &mpk->B_plus[attr->index * PARAM_M * PARAM_N];
+                
+                poly temp_result = (poly)calloc(PARAM_N, sizeof(scalar));
+                if (!temp_result) continue;
+                
+                double_poly temp_prod = (double_poly)calloc(2 * PARAM_N, sizeof(double_scalar));
+                poly reduced = (poly)calloc(PARAM_N, sizeof(scalar));
+                
+                if (!temp_prod || !reduced) {
+                    if (temp_prod) free(temp_prod);
+                    if (reduced) free(reduced);
+                    free(temp_result);
+                    continue;
+                }
+                
+                for (uint32_t j = 0; j < PARAM_M; j++) {
+                    poly B_ij = &B_plus_i[j * PARAM_N];
+                    poly omega_ij = &usk->omega_i[i][j * PARAM_N];
+                    
+                    memset(temp_prod, 0, 2 * PARAM_N * sizeof(double_scalar));
+                    memset(reduced, 0, PARAM_N * sizeof(scalar));
+                    
+                    mul_crt_poly(temp_prod, B_ij, omega_ij, LOG_R);
+                    reduce_double_crt_poly(reduced, temp_prod, LOG_R);
+                    add_poly(temp_result, temp_result, reduced, PARAM_N - 1);
+                    freeze_poly(temp_result, PARAM_N - 1);  
+                }
+                
+                free(temp_prod);
+                free(reduced);
+                
+                // Accumulate into thread-local sum
+                add_poly(local_sum, local_sum, temp_result, PARAM_N - 1);
+                freeze_poly(local_sum, PARAM_N - 1);
+                free(temp_result);
+            }
+            
+            // Critical section: accumulate thread-local sums into global sum_term
+            #pragma omp critical
+            {
+                poly sum_0 = poly_matrix_element(sum_term, PARAM_D, 0, 0);
+                add_poly(sum_0, sum_0, local_sum, PARAM_N - 1);
+                freeze_poly(sum_0, PARAM_N - 1);
+            }
+            
+            free(local_sum);
+        }
+    }
+    #else
+    // Sequential version (original code)
     for (uint32_t i = 0; i < attr_set->count; i++) {
         const Attribute *attr = &attr_set->attrs[i];
         
@@ -82,6 +167,7 @@ int lcp_keygen(const MasterPublicKey *mpk, const MasterSecretKey *msk,
         freeze_poly(sum_0, PARAM_N - 1);  
         free(temp_result);
     }
+    #endif
     
     
     poly target_0 = poly_matrix_element(target, PARAM_D, 0, 0);

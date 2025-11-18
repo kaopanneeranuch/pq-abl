@@ -21,6 +21,15 @@ if(USE_OPENSSL)
     add_definitions(-DUSE_OPENSSL)
 endif()
 
+# Option to use OpenMP for parallelization
+find_package(OpenMP)
+if(OpenMP_C_FOUND)
+    message(STATUS "OpenMP found: ${OpenMP_C_VERSION}")
+    add_definitions(-DUSE_OPENMP)
+else()
+    message(STATUS "OpenMP not found - parallelization disabled")
+endif()
+
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}
@@ -107,6 +116,10 @@ endif()
 
 if(USE_OPENSSL)
     target_link_libraries(lcp_abe OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+if(OpenMP_C_FOUND)
+    target_link_libraries(lcp_abe OpenMP::OpenMP_C)
 endif()
 
 # Test executables (built from lcp-abe/test)
