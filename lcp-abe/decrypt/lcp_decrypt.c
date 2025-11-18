@@ -1355,7 +1355,6 @@ int decrypt_ctobj_batch(const char **filenames,
             multiply_by_A(cache->A_omega_A, mpk->A, usk->omega_A);
         } else if (!cache) {
             // Cache full, fall back to non-cached decryption
-            fprintf(stderr, "[Decrypt] Warning: Policy cache full, using non-cached decryption\n");
         }
         
         uint8_t k_log[AES_KEY_SIZE];
@@ -1370,7 +1369,6 @@ int decrypt_ctobj_batch(const char **filenames,
             
             // If cached decryption fails, fall back to standard decryption
             if (decrypt_result != 0) {
-                fprintf(stderr, "[Decrypt] Warning: Cached decryption failed for file %u, falling back to standard\n", i + 1);
                 decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
                 used_cached = 0;
             }
@@ -1378,19 +1376,9 @@ int decrypt_ctobj_batch(const char **filenames,
             // Use standard decryption (for cache miss or no cache)
             decrypt_result = lcp_abe_decrypt(&log.ct_abe, usk, mpk, k_log);
         }
-        
-        // Debug: Track which method was used for files that will fail
-        // This helps identify if the issue is with cached or standard decryption
-        if (decrypt_result == 0) {
-            // Check if AES-GCM will fail (we can't know yet, but we can track the method)
-            // We'll add this info to the AES-GCM error message instead
-        }
-        
         if (decrypt_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: ABE decryption error for file %u/%u: %s (policy: %s, method: %s)\n", 
-                i + 1, n_files, filenames[i],
-                log.ct_abe.policy.expression,
-                used_cached ? "cached->standard" : "standard");
+            fprintf(stderr, "[Decrypt] FAILED: ABE decryption error for file %u/%u: %s\n", 
+                i + 1, n_files, filenames[i]);
             encrypted_log_free(&log);
             continue;
         }
@@ -1404,35 +1392,10 @@ int decrypt_ctobj_batch(const char **filenames,
                                                &log_data, &log_len);
         
         if (sym_result != 0) {
-            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u/%u: %s (policy: %s, method: %s)\n", 
-                i + 1, n_files, filenames[i], log.ct_abe.policy.expression,
-                used_cached ? "cached" : "standard");
-            // Debug: print first few bytes of key to verify it's not all zeros
-            fprintf(stderr, "[Decrypt] Debug: k_log[0:8] = %02x %02x %02x %02x %02x %02x %02x %02x\n",
-                k_log[0], k_log[1], k_log[2], k_log[3], k_log[4], k_log[5], k_log[6], k_log[7]);
-            // Check if key is all zeros (would indicate extraction failure)
-            int all_zeros = 1;
-            for (int z = 0; z < AES_KEY_SIZE; z++) {
-                if (k_log[z] != 0) {
-                    all_zeros = 0;
-                    break;
-                }
-            }
-            if (all_zeros) {
-                fprintf(stderr, "[Decrypt] Debug: WARNING - Extracted key is all zeros!\n");
-            }
-            // Log additional debug info for failed files
-            fprintf(stderr, "[Decrypt] Debug: Failed file details - n_components=%u, matrix_rows=%u, policy='%s'\n",
-                log.ct_abe.n_components, log.ct_abe.policy.matrix_rows, log.ct_abe.policy.expression);
-            if (log.ct_abe.policy.rho) {
-                fprintf(stderr, "[Decrypt] Debug: rho=[%u,%u]\n",
-                    log.ct_abe.policy.rho[0],
-                    log.ct_abe.policy.matrix_rows > 1 ? log.ct_abe.policy.rho[1] : 0);
-            }
-            if (sym_result != 0) {
-                encrypted_log_free(&log);
-                continue;
-            }
+            fprintf(stderr, "[Decrypt] FAILED: AES-GCM decryption or authentication failed for file %u/%u: %s\n", 
+                i + 1, n_files, filenames[i]);
+            encrypted_log_free(&log);
+            continue;
         }
         
         if (output_dir) {
