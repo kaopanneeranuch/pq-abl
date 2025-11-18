@@ -131,9 +131,22 @@ void crt_representation(poly f, int max_depth);
 
 void coeffs_representation(poly f, int max_depth);
 
+/* Diagnostic context marker: set by callers to label which conversion is
+ * currently running. When non-zero and ARITH_DUMP_INTERMEDIATE is enabled,
+ * debug prints will include this context value which helps correlate the
+ * invert_crt chain for different calls. */
+extern int ARITH_DEBUG_CONTEXT;
+
 void mul_crt_poly(double_poly crt_h, poly crt_f, poly crt_g, int depth);
 
 void reduce_double_crt_poly(poly crt_f, double_poly double_crt_f, int depth);
+
+/* Diagnostic helper: reduce and print one CRT component from a non-normalized
+ * double_poly `double_crt_f` for component index `comp_index` at `depth`.
+ * `tag` is printed to help identify the caller/site.
+ */
+void dump_double_crt_component(double_poly double_crt_f, int depth, int comp_index, const char *tag);
+void dump_crt_component(poly crt_f, int depth, int comp_index, const char *tag);
 
 
 
