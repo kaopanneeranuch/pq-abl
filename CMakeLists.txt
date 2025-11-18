@@ -161,6 +161,16 @@ if(NOT MSVC)
     target_link_libraries(test_revocation PRIVATE m)
 endif()
 
+# KeyGen benchmark test
+add_executable(test_benchmark_keygen lcp-abe/test/benchmark_keygen.c)
+target_include_directories(test_benchmark_keygen PRIVATE ${CMAKE_SOURCE_DIR}/lcp-abe)
+target_link_libraries(test_benchmark_keygen PRIVATE lcp_abe module_bfrs)
+
+# Link math library (needed for GCC/Clang, but not MSVC)
+if(NOT MSVC)
+    target_link_libraries(test_benchmark_keygen PRIVATE m)
+endif()
+
 # Utility to view CT_obj files
 add_executable(view_ctobj lcp-abe/util/view_ctobj.c)
 target_link_libraries(view_ctobj lcp_abe)
