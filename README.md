@@ -1,20 +1,96 @@
 # Log Anchoring & Verification System
 
-This project implements a blockchain-based log integrity system. It generates logs, computes their Merkle root, stores the data on IPFS, and anchors the cryptographic proof (Merkle Root and CIDs) to a local Ethereum blockchain (Anvil). This ensures that log data cannot be tampered with without detection.
+This project implements a blockchain-based log integrity system with LCP-ABE (Lattice-based Ciphertext-Policy Attribute-Based Encryption) support. It generates logs, computes their Merkle root, stores the data on IPFS, and anchors the cryptographic proof (Merkle Root and CIDs) to a local Ethereum blockchain (Anvil). This ensures that log data cannot be tampered with without detection. Additionally, LCP-ABE provides fine-grained access control for encrypted logs using attribute-based policies.
 
-##  Prerequisites
+## Prerequisites
 
 Ensure the following tools and dependencies are installed on your system:
 
 - **Rust Toolchain:** `cargo` (for building the Merkle tree tool)
 - **Foundry:** `anvil`, `forge`, `cast` (for blockchain simulation and interaction)
-- **IPFS:** `ipfs` CLI (kubo) must be installed and the daemon running.
-- **Python 3:** Required for log generation scripts.
-- **Utilities:** `sha3sum`, `tar`, `awk`, `find`, `xargs`.
+- **IPFS:** `ipfs` CLI (kubo) must be installed and the daemon running
+- **Python 3:** Required for log generation scripts
+- **CMake:** Required for building LCP-ABE
+- **OpenSSL:** (optional, for AES-GCM encryption)
+- **OpenMP:** (optional, for parallelization)
+- **Utilities:** `sha3sum`, `tar`, `awk`, `find`, `xargs`
 
-##  Setup & Installation
+---
+
+## LCP-ABE Usage
+
+LCP-ABE (Lattice-based Ciphertext-Policy Attribute-Based Encryption) provides fine-grained access control for encrypted logs using attribute-based policies.
+
+### Build LCP-ABE
+
+Compile the LCP-ABE library and test executables:
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+```
+
+This creates executables in the `build/` directory: `test_setup`, `test_keygen`, `test_encrypt`, `test_decrypt`, etc.
+
+### Setup Phase
+
+Generate master public key (MPK) and master secret key (MSK):
+
+```bash
+cd build
+./test_setup
+```
+
+This creates `keys/MPK.bin` and `keys/MSK.bin` in the project root.
+
+### Key Generation Phase
+
+Generate user secret keys based on attributes. Example: generate keys for all role-team combinations:
+
+```bash
+cd build
+./test_keygen
+```
+
+This creates user secret keys in `keys/` directory (e.g., `keys/SK_admin_storage_team.bin`).
+
+### Encryption Phase
+
+Encrypt logs with an access policy. The policy specifies which attributes are required to decrypt:
+
+```bash
+cd build
+./test_encrypt
+```
+
+This reads logs from `logs/log.json` and encrypts them using a policy (e.g., `"user_role:admin AND team:storage-team"`). Encrypted outputs are saved to `out/encrypted/`.
+
+### Decryption Phase
+
+Decrypt encrypted logs using a user secret key:
+
+```bash
+cd build
+./test_decrypt [ctobj_file] [sk_file]
+```
+
+- No arguments: decrypts all files in `out/encrypted/` with default SK
+- 1 argument: decrypts specific CT_obj file with default SK
+- 2 arguments: decrypts specific CT_obj file with specified SK file
+
+Example:
+
+```bash
+./test_decrypt out/encrypted/ctobj_xxx.bin keys/SK_admin_storage_team.bin
+```
+
+---
+
+## Setup & Installation
 
 ### 1. Build the Merkle Tree Tool
+
 Compile the Rust binary used for computing Merkle roots and proofs.
 
 ```bash
@@ -22,6 +98,7 @@ bash build.sh
 ```
 
 ### 2. Start Local Blockchain
+
 Start the Anvil local testnet in a separate terminal window.
 
 ```bash
@@ -29,6 +106,7 @@ anvil
 ```
 
 ### 3. Environment Configuration
+
 From the Anvil output, copy a private key to use for deployment.
 
 ```bash
@@ -37,6 +115,7 @@ export PRIVATE_KEY="<private-key>"
 ```
 
 ### 4. Smart Contract Deployment
+
 Deploy the anchoring and receipt verification contracts.
 
 ```bash
@@ -62,7 +141,7 @@ export RECEIPTCONTRACT_ADDR="<receiptContract address>"
 
 ---
 
-##  Workflow
+## Workflow
 
 ### Phase 1: Log Generation & Preparation
 
@@ -79,7 +158,8 @@ find ./logs -type f -print0 | sort -z | xargs -r0 sha3sum -a 256 | awk '{ print 
 
 # 3. Compress logs and cleanup
 echo "Compressing logs and cleaning up raw files..."
-tar -czvf epoch1.tar.gz ./logs/* rm -rf ./logs
+tar -czvf epoch1.tar.gz ./logs/* 
+rm -rf ./logs
 ```
 
 ### Phase 2: Storage (IPFS) & Computation
@@ -119,11 +199,12 @@ cast send $ANCHORCONTRACT_ADDR \
 
 ---
 
-##  Verification Process
+## Verification Process
 
 This process retrieves the data from the blockchain, downloads the files from IPFS, and verifies that the current logs match the anchored Merkle Root.
 
 ### 1. Retrieve Anchored Data
+
 Fetch the Root and CIDs stored on the blockchain.
 
 ```bash
@@ -139,6 +220,7 @@ GET_IPFS_CT_CID=$(cat temp_env | awk '{ print $3 }')
 ```
 
 ### 2. Download & Verify Integrity
+
 Download the logs and proof from IPFS, re-hash the logs, and run the Merkle verification.
 
 ```bash
@@ -162,7 +244,7 @@ cat temp_verify
 
 ---
 
-##  Benchmark
+## Benchmark
 
 To run the automated benchmark script:
 
