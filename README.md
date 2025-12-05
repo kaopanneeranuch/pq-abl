@@ -62,7 +62,7 @@ export RECEIPTCONTRACT_ADDR="<receiptContract address>"
 
 ---
 
-## 🔄 Workflow
+##  Workflow
 
 ### Phase 1: Log Generation & Preparation
 
@@ -119,7 +119,7 @@ cast send $ANCHORCONTRACT_ADDR \
 
 ---
 
-## 🔍 Verification Process
+##  Verification Process
 
 This process retrieves the data from the blockchain, downloads the files from IPFS, and verifies that the current logs match the anchored Merkle Root.
 
