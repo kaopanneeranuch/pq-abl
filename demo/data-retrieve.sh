@@ -5,7 +5,7 @@ cast call $ANCHORCONTRACT_ADDR "getAllInfoCurrentMapper()((string,string,string)
 GET_ROOT=$(cat temp_env| awk '{ print $1 }')
 GET_IPFS_PROOF_CID=$(cat temp_env| awk '{ print $2 }')
 GET_IPFS_CT_CID=$(cat temp_env| awk '{ print $3 }')
-# sleep 5
+sleep 5
 #
 # # ipfs get data
 #
@@ -14,5 +14,6 @@ ipfs get $GET_IPFS_PROOF_CID -o ./epoch1_proof
 ipfs get $GET_IPFS_CT_CID -o ./epoch1.tar.gz
 tar -xzvf ./epoch1.tar.gz
 find ./logs -type f -print0 | sort -z | xargs -r0 sha3sum -a 256 | awk '{ print $1 }' > epoch1_digest 
+ls
 # #
 #

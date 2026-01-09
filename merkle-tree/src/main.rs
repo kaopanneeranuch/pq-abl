@@ -132,12 +132,6 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
     let mut is_lowestpair = true;
     let mut pair_count = 0;
     let mut tamper_rec: Vec<_> = Vec::new();
-    // Open temp_verify to write the verify result.
-    // let mut file_verify = OpenOptions::new()
-    //     .write(true)
-    //     .append(true)
-    //     .open("temp_verify")
-    //     .unwrap();
     while length > 1{
         let mut i = 0;
         while i < length {
@@ -162,16 +156,10 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
                 // compare i proof with new compute proof (from digest)
                 if proof[pair_count].as_bytes() == nodes[i / 2].as_bytes() {
                     println!("Valid");
-                    // if let Err(e) = writeln!(file_verify, "Verify digest pair with proof {} : Valid", pair_count + 1){
-                    //     eprintln!("Counldn't write to file: {}", e)
-                    //     }
                 // we compute and check hash digest with proof with only the lowest pair b/c our
                 }
                 else {
                     println!("Invalid");
-                    // if let Err(e) = writeln!(file_verify, "Verify digest pair with proof {} : Invalid", pair_count){
-                    //     eprintln!("Counldn't write to file: {}", e)
-                    //     }
                     tamper_rec.push(pair_count + 1);
                     // break;
                 }
@@ -185,18 +173,11 @@ pub fn verify_proof_root(ct_digest: &[Hash], proof: &[Hash], root: &[Hash]) -> b
         if length == 1{
             if root[0].as_bytes() == proof_nodes[0].as_bytes(){
                 println!("Verify proof: Valid");
-                // if let Err(e) = writeln!(file_verify, "Verify proof : Invalid"){
-                //     eprintln!("Counldn't write to file: {}", e)
-                //     }
                 if tamper_rec.len() > 1{
                     print!("The digest that got tampered is in pair: ");
-                    // if let Err(e) = write!(file_verify, "The digest that got tampered is in pair : "){
-                    //     eprintln!("Counldn't write to file: {}", e)
-                    // }
                     let tamper_rec_len = tamper_rec.len();
                     for i in 0..tamper_rec_len {
                         print!("{}, ", tamper_rec[i]);
-                        // write!(file_verify, "{}, ", temper_rec[i]);
                     }
                     println!();
                 }
